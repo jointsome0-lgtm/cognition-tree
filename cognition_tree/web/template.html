@@ -293,7 +293,11 @@
     if (status === "current") el("circle", { r: 9.5, class: "ring" }, g);
     el("circle", { r: isChild ? 3.6 : 5.6, class: "body" }, g);
     if (placed.tagged && !/:/.test(step.id)) {
-      const t = el("text", { x: 13, y: 4, class: "tag" }, g);
+      // Beside the stem, not along it, so the next nodes never cover the tag.
+      let nx = -Math.sin(placed.angle), ny = Math.cos(placed.angle);
+      if (Math.abs(Math.cos(placed.angle)) > 0.5 ? ny > 0 : nx < 0) { nx = -nx; ny = -ny; }
+      const anchor = Math.abs(nx) < 0.5 ? "middle" : (nx > 0 ? "start" : "end");
+      const t = el("text", { x: (x + nx * 15).toFixed(1), y: (y + ny * 15 + 4).toFixed(1), "text-anchor": anchor, class: "tag" }, tagLayer);
       t.textContent = step.id;
     }
     stepIndex.set(`${branch.repo}|${step.id}`, { x, y, step });
@@ -301,6 +305,7 @@
   }
 
   let selected = null;
+  let tagLayer = null;  // drawn last, above every node
   function bindSelect(node, fn) {
     node.addEventListener("click", e => { e.stopPropagation(); fn(); });
     node.addEventListener("keydown", e => {
@@ -417,7 +422,10 @@
     const world = el("g", { id: "world" }, svg);
     const roots = el("g", {}, world);
     const stems = el("g", {}, world);
+    const tags = el("g", {});
+    tagLayer = tags;
     for (const placed of layout()) drawBranch(stems, placed, animate);
+    world.appendChild(tags);
     el("circle", { r: R_CORE, class: "core" }, world);
     const done = data.branches.reduce((s, b) => s + b.done, 0);
     const total = data.branches.reduce((s, b) => s + b.total, 0);
