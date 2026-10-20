@@ -1,0 +1,70 @@
+schema = 1
+
+[[locked]]
+id = "paper-machine"
+title = "**Paper** machine"
+source = { title = "[Paper machine](https://example.invalid/source)", url = "https://example.invalid/source" }
+note = "Keep `small` parts in the [tray](https://example.invalid/tray)."
+
+[[locked.requires]]
+repo = "paper-lab"
+step = "P01b"
+label = "**Recorded** angle"
+
+[[locked.requires]]
+repo = "paper-lab"
+step = "P03"
+label = "Aligned edges"
+
+[[locked.requires]]
+repo = "paper-lab"
+step = "unwritten"
+label = "An absent step"
+
+[[locked.requires]]
+repo = "gear-lab"
+step = "G1"
+label = "Finished gear group"
+
+[[locked.requires]]
+repo = "paper-lab"
+step = "A0"
+label = "Unfinished paper group"
+
+[[locked.requires]]
+repo = "gear-lab"
+step = "G9"
+label = "An absent group"
+
+[[locked.requires]]
+repo = "absent-lab"
+step = "M01"
+label = "An absent repository"
+
+[[locked]]
+id = "side-door"
+title = "Side door"
+hidden = true
+source = { title = "Side door", url = "https://example.invalid/side-door" }
+
+[[locked.requires]]
+repo = "side-lab"
+step = "S01"
+label = "[Side task](https://example.invalid/task)"
+
+[[locked.requires]]
+repo = "paper-lab"
+step = "P03"
+label = "Owner recorded completion"
+met = "2026-09-01"
+
+[[locked.requires]]
+repo = "absent-lab"
+step = "manual"
+label = "Owner recorded an external result"
+met = "2026-09-02"
+
+[[locked]]
+id = "empty-gate"
+title = "Empty gate"
+source = { title = "Empty gate", url = "https://example.invalid/empty-gate" }

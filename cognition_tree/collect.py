@@ -1,0 +1,233 @@
+"""Read local repositories into the tree data contract."""
+
+from datetime import datetime
+from pathlib import Path
+import re
+import tomllib
+
+
+_LINK = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
+_TABLE_HEADER = re.compile(r"^\|\s*Branch\s*\|\s*Repository\s*\|")
+_SECTION = re.compile(r"^##(?:\s+(.*))?$")
+_LINE = re.compile(r"^###\s+(.+)$")
+_ITEM = re.compile(r"^( *)- \[([ xX])\]\s*(.*)$")
+_DASH = re.compile(r"\s*[—–]\s*|\s+-\s+")
+
+
+def _plain(text: str) -> str:
+    """Remove the Markdown formatting named in the contract."""
+    return _LINK.sub(r"\1", text).replace("`", "").replace("**", "").strip()
+
+
+def _branches(readme: Path) -> list[dict]:
+    if not readme.is_file():
+        raise ValueError(f"Hub table is missing: {readme}")
+    in_table = False
+    branches = []
+    for line in readme.read_text(encoding="utf-8").splitlines():
+        if not in_table:
+            if _TABLE_HEADER.match(line.strip()):
+                in_table = True
+            continue
+        if not line.strip().startswith("|"):
+            break
+        cells = line.strip().strip("|").split("|")
+        if len(cells) < 2:
+            continue
+        link = _LINK.search(cells[1])
+        if link:
+            repo = _plain(link[1])
+            branches.append({
+                "id": repo,
+                "title": _plain(cells[0]),
+                "repo": repo,
+                "url": link[2],
+            })
+    if not in_table:
+        raise ValueError(f"Hub table is missing: {readme}")
+    return branches
+
+
+def parse_progress(text: str) -> list[dict]:
+    """Parse checklist sections, preserving line and item order."""
+    lines = []
+    active = False
+    title = None
+    current_line = None
+    stack = []
+    group_counts = {}
+    fallback_count = 0
+
+    for raw in text.splitlines():
+        section = _SECTION.match(raw)
+        if section:
+            heading = (section[1] or "").lower()
+            active = "checklist" in heading and "preserved" not in heading
+            title, current_line, stack = _plain(section[1] or "") or None, None, []
+            continue
+        if not active:
+            continue
+        heading = _LINE.match(raw)
+        if heading:
+            title, current_line, stack = _plain(heading[1]), None, []
+            continue
+        item = _ITEM.match(raw)
+        if not item:
+            continue
+        if current_line is None:
+            current_line = {"title": title, "steps": []}
+            lines.append(current_line)
+            fallback_count = 0
+
+        text = _plain(item[3])
+        group = None
+        body = text
+        if "·" in text:
+            prefix, _, rest = text.partition("·")
+            if prefix.strip() and rest.strip():
+                group, body = prefix.strip(), rest.strip()
+        parts = _DASH.split(body, maxsplit=1)
+        if len(parts) == 2 and parts[0] and parts[1]:
+            step_id, step_title = parts
+        elif group:
+            group_counts[group] = group_counts.get(group, 0) + 1
+            step_id, step_title = f"{group}:{group_counts[group]}", body
+        else:
+            fallback_count += 1
+            step_id, step_title = f"line-{len(lines)}:{fallback_count}", text
+        step = {
+            "id": step_id,
+            "group": group,
+            "title": step_title,
+            "done": item[2].lower() == "x",
+            "current": False,
+            "children": [],
+        }
+        indent = len(item[1]) if len(item[1]) >= 2 else 0
+        while stack and stack[-1][0] >= indent:
+            stack.pop()
+        if stack:
+            stack[-1][1]["children"].append(step)
+        else:
+            current_line["steps"].append(step)
+        stack.append((indent, step))
+
+    for line in lines:
+        for step in line["steps"]:
+            if not step["done"]:
+                step["current"] = True
+                break
+    return lines
+
+
+def merge_archive(lines: list[dict], archived: list[dict]) -> list[dict]:
+    """Put archived done items before the live items of the line with the same title."""
+    live_ids = {step["id"] for line in lines for step in _walk(line["steps"])}
+    merged = [dict(line, steps=list(line["steps"])) for line in lines]
+    by_title = {line["title"]: line for line in merged}
+    new_lines = []
+    for line in archived:
+        steps = [step for step in line["steps"] if step["done"] and step["id"] not in live_ids]
+        for step in steps:
+            step["current"] = False
+            for item in _walk([step]):
+                item["archived"] = True
+        if not steps:
+            continue
+        target = by_title.get(line["title"])
+        if target is None:
+            target = {"title": line["title"], "steps": []}
+            by_title[line["title"]] = target
+            new_lines.append(target)
+        target["steps"][:0] = steps
+    return new_lines + merged
+
+
+def _walk(steps):
+    for step in steps:
+        yield step
+        yield from _walk(step["children"])
+
+
+def _items(repository: dict) -> list[dict]:
+    return [step for line in repository["lines"] for step in _walk(line["steps"])]
+
+
+def _requirement_status(requirement: dict, repository: dict) -> str:
+    if "met" in requirement:
+        return "met"
+    items = _items(repository)
+    matches = [item for item in items if item["id"] == requirement["step"]]
+    group = [item for item in items if item["group"] == requirement["step"]]
+    if any(item["done"] for item in matches) or (
+        group and all(item["done"] for item in group)
+    ):
+        return "met"
+    return "open" if matches or group else "unknown"
+
+
+def collect(root: str | Path, hub: str = "learning-hub") -> dict:
+    """Collect branches and evaluate locks against local progress."""
+    root = Path(root).expanduser()
+    if not root.is_dir():
+        raise ValueError(f"Root directory is missing or is not a directory: {root}")
+    hub_path = root / hub
+    branches = _branches(hub_path / "README.md")
+    cache = {}
+
+    def repository(repo: str) -> dict:
+        if repo not in cache:
+            progress = root / repo / "PROGRESS.md"
+            archive = root / repo / "ARCHIVE.md"
+            found = (root / repo).is_dir() and progress.is_file()
+            lines = parse_progress(progress.read_text(encoding="utf-8")) if found else []
+            if found and archive.is_file():
+                lines = merge_archive(lines, parse_progress(archive.read_text(encoding="utf-8")))
+            data = {"found": found, "lines": lines}
+            items = _items(data)
+            data.update(done=sum(item["done"] for item in items), total=len(items))
+            cache[repo] = data
+        return cache[repo]
+
+    for branch in branches:
+        branch.update(repository(branch["repo"]))
+
+    config = hub_path / "tree.toml"
+    locks = tomllib.loads(config.read_text(encoding="utf-8")) if config.is_file() else {}
+    locked = []
+    for entry in locks.get("locked", []):
+        requirements = []
+        for requirement in entry.get("requires", []):
+            requirements.append({
+                "repo": requirement["repo"],
+                "step": requirement["step"],
+                "label": _plain(requirement.get("label", requirement["step"])),
+                "status": _requirement_status(
+                    requirement, repository(requirement["repo"])
+                ),
+            })
+        branch = {
+            "id": entry["id"],
+            "title": _plain(entry["title"]),
+            "hidden": entry.get("hidden", False),
+        }
+        if "source" in entry:
+            branch["source"] = {
+                "title": _plain(entry["source"]["title"]),
+                "url": entry["source"]["url"],
+            }
+        if "note" in entry:
+            branch["note"] = _plain(entry["note"])
+        met = sum(item["status"] == "met" for item in requirements)
+        branch.update(
+            requires=requirements, met=met, total=len(requirements),
+            open=met == len(requirements),
+        )
+        locked.append(branch)
+
+    return {
+        "schema": 1,
+        "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "branches": branches,
+        "locked": locked,
+    }
