@@ -10,7 +10,7 @@ All inputs are local files. Nothing is fetched from the network.
 - **Hub:** one repository in the root, `learning-hub` by default. Its `README.md` holds a Markdown table whose header row starts with `| Branch | Repository |`. Each row gives a branch title in the first cell and a link `[repo-name](url)` in the second; the order of rows is the order of branches. Other cells are ignored.
 - **Locks:** `tree.toml` in the hub, optional. See [Locks](#locks).
 - **Archive:** `ARCHIVE.md` in each repository, optional. See [Archive](#archive).
-- **Progress:** `PROGRESS.md` in each repository. Only the checklist sections are read: a `##` heading whose text contains `checklist` (case-insensitive), except one whose text also contains `preserved`. A section ends at the next `##` heading.
+- **Progress:** `PROGRESS.md` in each repository. Only the checklist sections are read: a `##` heading whose text contains `checklist` (case-insensitive), except one whose text also contains `preserved`, and except one whose text contains `milestone` when the file has another checklist section, since milestones group the same steps. A section ends at the next `##` heading.
 
 ### Checklist lines
 

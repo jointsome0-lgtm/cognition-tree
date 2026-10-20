@@ -48,8 +48,20 @@ def _branches(readme: Path) -> list[dict]:
     return branches
 
 
+def _checklist_heading(heading: str) -> bool:
+    heading = heading.lower()
+    return ("checklist" in heading or "чек-лист" in heading) and "preserved" not in heading
+
+
 def parse_progress(text: str) -> list[dict]:
-    """Parse checklist sections, preserving line and item order."""
+    """Parse checklist sections, preserving line and item order.
+
+    A milestone checklist is skipped when the file has a finer one, because
+    milestones group the same steps.
+    """
+    headings = [m[1] or "" for m in map(_SECTION.match, text.splitlines()) if m]
+    checklists = [h for h in headings if _checklist_heading(h)]
+    skip_milestones = any("milestone" not in h.lower() for h in checklists)
     lines = []
     active = False
     title = None
@@ -61,8 +73,10 @@ def parse_progress(text: str) -> list[dict]:
     for raw in text.splitlines():
         section = _SECTION.match(raw)
         if section:
-            heading = (section[1] or "").lower()
-            active = ("checklist" in heading or "чек-лист" in heading) and "preserved" not in heading
+            heading = section[1] or ""
+            active = _checklist_heading(heading) and not (
+                skip_milestones and "milestone" in heading.lower()
+            )
             title, current_line, stack = _plain(section[1] or "") or None, None, []
             continue
         if not active:

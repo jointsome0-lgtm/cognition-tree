@@ -253,3 +253,16 @@ class BookTests(unittest.TestCase):
     def test_russian_checklist_heading(self):
         lines = parse_progress("## Чек-лист\n- [x] A1 — Первый\n- [ ] A2 — Второй\n")
         self.assertEqual([s["id"] for s in lines[0]["steps"]], ["A1", "A2"])
+
+
+class MilestoneTests(unittest.TestCase):
+    def test_milestones_skipped_beside_a_finer_checklist(self):
+        lines = parse_progress(
+            "## Atomic checklist\n- [ ] S1 — Small\n"
+            "## Milestone checklist\n- [ ] M1 — Big\n"
+        )
+        self.assertEqual([s["id"] for line in lines for s in line["steps"]], ["S1"])
+
+    def test_milestones_kept_when_they_are_the_only_list(self):
+        lines = parse_progress("## Milestone checklist\n- [ ] M1 — Big\n")
+        self.assertEqual([s["id"] for line in lines for s in line["steps"]], ["M1"])
