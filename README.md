@@ -33,3 +33,7 @@ A locked branch is drawn as a seed beyond the rim, with roots to the steps it wa
 ## Privacy
 
 The generated page contains your progress. It is written to `out/`, which Git ignores. Keep it local, or publish it on purpose.
+
+## License
+
+[MIT](LICENSE).
