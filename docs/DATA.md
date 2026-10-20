@@ -89,6 +89,20 @@ A progress file may be shortened as the learner advances. A done item is then mo
 
 The build reads the archive like a progress file and keeps only done items whose ID is not in `PROGRESS.md`. Each is marked `archived`, children included, and is never `current`. The archived items of a line go before its live items, in archive order; a line found only in the archive goes before all live lines. An item that is not done in the archive is ignored.
 
+## Books
+
+`tree.toml` may list books that have a practice repository:
+
+```toml
+[[book]]
+repo = "learn-knots"
+title = "The Ashley Book of Knots"
+short = "Ashley"      # optional; the branch title when the book is not in the hub table
+emblem = "🪢"         # optional
+```
+
+A book whose repository is a branch in the hub table marks that branch; any other book is added after the hub branches, with `url` from the entry or null. Either way the branch gets `"book": {"title": ..., "emblem": ...}`, with `emblem` an empty string when not given. Branches that are not books have no `book` key. A `##` heading containing `чек-лист` also counts as a checklist section.
+
 ## Locks
 
 `tree.toml` in the hub:

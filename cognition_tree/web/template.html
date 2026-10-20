@@ -78,6 +78,8 @@
   .stem { fill: none; stroke: var(--peat); stroke-width: 1.6; stroke-linecap: round; }
   .stem.missing { stroke: var(--fog); stroke-dasharray: 3 5; }
   .trunk { stroke-width: 3.2; }
+  .stem.book { stroke: var(--heartwood); }
+  .branch-label.book { font-style: italic; }
   .node { cursor: pointer; }
   .node circle.body { fill: var(--lichen); stroke: var(--peat); stroke-width: 1.4; }
   .node.done circle.body { fill: var(--leaf); stroke: var(--leaf); }
@@ -238,13 +240,14 @@
   function drawBranch(group, placed, animate) {
     const { branch, angle, lines } = placed;
     const trunkEnd = polar(R_TRUNK, angle);
-    const trunk = el("path", { d: smoothPath([polar(R_CORE, angle), trunkEnd]), class: "stem trunk" + (branch.found ? "" : " missing") }, group);
+    const book = branch.book ? " book" : "";
+    const trunk = el("path", { d: smoothPath([polar(R_CORE, angle), trunkEnd]), class: "stem trunk" + book + (branch.found ? "" : " missing") }, group);
     grow(trunk, animate, 0);
     let tipR = R_TRUNK, tip = trunkEnd, tagged = false;
     for (const { line, steps } of lines) {
       if (!steps.length) continue;
       const pts = [trunkEnd, ...steps.map(s => [s.x, s.y])];
-      grow(el("path", { d: smoothPath(pts), class: "stem" }, group), animate, 0.25);
+      grow(el("path", { d: smoothPath(pts), class: "stem" + book }, group), animate, 0.25);
       for (const s of steps) for (const c of s.children) {
         el("path", { d: `M${s.x.toFixed(1)},${s.y.toFixed(1)} L${c.x.toFixed(1)},${c.y.toFixed(1)}`, class: "stem", "stroke-width": 1 }, group);
       }
@@ -264,8 +267,8 @@
     const [lx, ly] = polar(tipR + 26, angle);
     const anchor = Math.abs(Math.cos(angle)) < 0.25 ? "middle" : (Math.cos(angle) > 0 ? "start" : "end");
     const dy = Math.sin(angle) < -0.6 ? -6 : (Math.sin(angle) > 0.6 ? 14 : 4);
-    const label = el("text", { x: lx, y: ly + dy, "text-anchor": anchor, class: "branch-label", tabindex: 0, role: "button" }, group);
-    label.textContent = branch.title;
+    const label = el("text", { x: lx, y: ly + dy, "text-anchor": anchor, class: "branch-label" + book, tabindex: 0, role: "button" }, group);
+    label.textContent = branch.book && branch.book.emblem ? `${branch.book.emblem} ${branch.title}` : branch.title;
     el("text", { x: lx, y: ly + dy + 16, "text-anchor": anchor, class: "branch-count" }, group).textContent =
       branch.found ? `${branch.done} of ${branch.total}` : "not found";
     bindSelect(label, () => showBranch(branch));
@@ -345,7 +348,8 @@
         ${cur ? `<br><span class="hint">Now: ${esc(cur.id.includes(":") ? cur.title : cur.id + " " + cur.title)}</span>` : ""}</li>`;
     }).join("");
     panel.innerHTML = `
-      <h2>${esc(branch.title)}</h2>
+      <h2>${esc(branch.book && branch.book.emblem ? `${branch.book.emblem} ${branch.title}` : branch.title)}</h2>
+      ${branch.book ? `<p class="where">Book: ${esc(branch.book.title)}</p>` : ""}
       <p class="where">${branch.found ? `${branch.done} of ${branch.total} steps done` : "The repository or its progress file was not found."}</p>
       ${lines ? `<ul>${lines}</ul>` : ""}
       ${safeUrl(branch.url) ? `<p><a href="${esc(branch.url)}" target="_blank" rel="noopener">Open ${esc(branch.repo)}</a></p>` : ""}`;

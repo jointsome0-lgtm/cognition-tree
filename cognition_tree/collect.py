@@ -62,7 +62,7 @@ def parse_progress(text: str) -> list[dict]:
         section = _SECTION.match(raw)
         if section:
             heading = (section[1] or "").lower()
-            active = "checklist" in heading and "preserved" not in heading
+            active = ("checklist" in heading or "чек-лист" in heading) and "preserved" not in heading
             title, current_line, stack = _plain(section[1] or "") or None, None, []
             continue
         if not active:
@@ -189,11 +189,26 @@ def collect(root: str | Path, hub: str = "learning-hub") -> dict:
             cache[repo] = data
         return cache[repo]
 
-    for branch in branches:
-        branch.update(repository(branch["repo"]))
-
     config = hub_path / "tree.toml"
     locks = tomllib.loads(config.read_text(encoding="utf-8")) if config.is_file() else {}
+
+    by_repo = {branch["repo"]: branch for branch in branches}
+    for entry in locks.get("book", []):
+        book = {"title": _plain(entry["title"]), "emblem": entry.get("emblem", "")}
+        branch = by_repo.get(entry["repo"])
+        if branch is None:
+            branch = {
+                "id": entry["repo"],
+                "title": _plain(entry.get("short", entry["title"])),
+                "repo": entry["repo"],
+                "url": entry.get("url"),
+            }
+            branches.append(branch)
+            by_repo[entry["repo"]] = branch
+        branch["book"] = book
+
+    for branch in branches:
+        branch.update(repository(branch["repo"]))
     locked = []
     for entry in locks.get("locked", []):
         requirements = []

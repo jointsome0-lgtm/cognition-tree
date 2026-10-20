@@ -228,3 +228,28 @@ class ArchiveTests(unittest.TestCase):
             (root / "paper-lab" / "ARCHIVE.md").write_text(self.ARCHIVE, encoding="utf-8")
             paper = collect(root)["branches"][0]
         self.assertEqual((paper["done"], paper["total"]), (4, 6))
+
+
+class BookTests(unittest.TestCase):
+    def test_books_mark_branches_and_add_missing_ones(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "root"
+            shutil.copytree(ROOT, root)
+            config = root / "learning-hub" / "tree.toml"
+            config.write_text(config.read_text(encoding="utf-8") + (
+                '\n[[book]]\nrepo = "gear-lab"\ntitle = "The Gear Book"\nemblem = "⚙"\n'
+                '\n[[book]]\nrepo = "side-lab"\ntitle = "A **Side** Book"\nshort = "Side"\n'
+            ), encoding="utf-8")
+            tree = collect(root)
+        by_repo = {branch["repo"]: branch for branch in tree["branches"]}
+        self.assertEqual(by_repo["gear-lab"]["title"], "Gears")
+        self.assertEqual(by_repo["gear-lab"]["book"], {"title": "The Gear Book", "emblem": "⚙"})
+        self.assertNotIn("book", by_repo["paper-lab"])
+        side = tree["branches"][-1]
+        self.assertEqual((side["repo"], side["title"], side["url"]), ("side-lab", "Side", None))
+        self.assertEqual(side["book"], {"title": "A Side Book", "emblem": ""})
+        self.assertTrue(side["found"])
+
+    def test_russian_checklist_heading(self):
+        lines = parse_progress("## Чек-лист\n- [x] A1 — Первый\n- [ ] A2 — Второй\n")
+        self.assertEqual([s["id"] for s in lines[0]["steps"]], ["A1", "A2"])
