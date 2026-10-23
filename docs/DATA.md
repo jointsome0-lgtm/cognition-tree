@@ -125,7 +125,7 @@ Each branch has `parts`, empty when there are none, and each part has:
 - `closed` is true when the part, its own parts included, has at least one item and every item is done.
 - A lock's `step` is looked up in every part as well, so a step moved into a folder still meets its requirement. When two parts use the same ID, the requirement is met if either is done.
 
-The page draws a closed part as a cluster of small stars where its parent's stem forks, and an open part as a node from which its own lines fan out.
+The page draws an open part as a node from which its own lines fan out, and a closed part as one star whose shape and tint come from its path, so it never changes. The only closed part at the end of a trunk sits on it; any other closed part takes its own slot in its parent's fan, in name order.
 
 ## Books
 

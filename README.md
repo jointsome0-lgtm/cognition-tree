@@ -20,13 +20,13 @@ xdg-open out/index.html
 - The hub's `README.md`: a table whose header starts with `| Branch | Repository |`, one row per branch.
 - Each branch repository's `PROGRESS.md`: the checklist sections, `- [ ]` and `- [x]` items with optional `###` lines.
 - `tree.toml` in the hub, optional: locked branches and their prerequisites.
-- Subfolders with their own `PROGRESS.md`, optional: parts of a branch. A finished part shrinks into a cluster of stars near the trunk, and an open part forks into its own lines.
+- Subfolders with their own `PROGRESS.md`, optional: parts of a branch. A finished part shrinks into one star of its own, shaped from its name, and an open part forks into its own lines.
 
 The exact formats are in [docs/DATA.md](docs/DATA.md).
 
 ## Locked branches
 
-A locked branch is drawn as a seed beyond the rim, with roots to the steps it waits for. Two modes, switched on the page:
+A locked branch is drawn as a seed beyond the rim, with roots to the steps it still waits for; a root disappears once its step is done. Two modes, switched on the page:
 
 - **Show as silhouettes:** every locked branch is visible with a count such as "2 of 5". A branch marked `hidden` shows as "???" until it opens.
 - **Keep as a surprise:** locked branches are not drawn at all. A branch appears, with a short bloom, the first time it opens.

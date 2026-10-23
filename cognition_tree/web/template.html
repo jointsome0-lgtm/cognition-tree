@@ -117,7 +117,6 @@
   .branch-label { font: 400 17px var(--serif); fill: var(--peat); cursor: pointer; }
   .branch-count { font: 12px var(--sans); fill: var(--peat-soft); pointer-events: none; }
   .root { fill: none; stroke-width: 1.2; }
-  .root.met { stroke: var(--leaf); }
   .root.open { stroke: var(--fog); stroke-dasharray: 4 5; }
   .root.unknown { stroke: var(--fog); stroke-dasharray: 1 6; stroke-linecap: round; opacity: 0.8; }
   .spore circle.shell { fill: var(--lichen-deep); stroke: var(--fog); stroke-width: 1.5; stroke-dasharray: 2 4; }
@@ -130,11 +129,13 @@
   .part-node:focus { outline: none; }
   .part-node:focus-visible path, .part-node.selected path { stroke: var(--pollen); stroke-width: 2.5; }
   .part-label { font: italic 400 12px var(--serif); fill: var(--peat-soft); paint-order: stroke; stroke: var(--lichen); stroke-width: 3px; pointer-events: none; }
-  .cluster { cursor: pointer; }
-  .cluster:focus { outline: none; }
-  .cluster-halo { fill: var(--lichen-deep); stroke: var(--leaf); stroke-opacity: 0.5; }
-  .cluster-star { fill: var(--leaf); }
-  .cluster:focus-visible .cluster-halo, .cluster.selected .cluster-halo { stroke: var(--pollen); stroke-width: 2.5; stroke-opacity: 1; }
+  .part-star { cursor: pointer; }
+  .part-star:focus { outline: none; }
+  .part-star .rays { fill: var(--leaf); stroke: var(--peat); stroke-width: 0.8; stroke-linejoin: round; }
+  .part-star .rays.second { fill: var(--lichen); }
+  .part-star .spikes { stroke: var(--peat); stroke-width: 0.7; opacity: 0.5; }
+  .part-star .heart { fill: var(--lichen); }
+  .part-star:focus-visible .rays, .part-star.selected .rays { stroke: var(--pollen); stroke-width: 2; }
   .core { fill: var(--peat); }
   .core-text { font: 400 13px var(--serif); fill: var(--lichen); pointer-events: none; }
 
@@ -160,8 +161,6 @@
   .stop-halo-out { stop-color: #ffd166; stop-opacity: 0; }
   .stop-nebula-in { stop-color: #b9a2ff; stop-opacity: 0.6; }
   .stop-nebula-out { stop-color: #5b4bb0; stop-opacity: 0; }
-  .stop-cluster-in { stop-color: #9fe6ff; stop-opacity: 0.4; }
-  .stop-cluster-out { stop-color: #9fe6ff; stop-opacity: 0; }
   [data-theme="night"] .spark, [data-theme="night"] .halo { display: inline; }
   [data-theme="night"] .legend .open { fill: #8f9ad8; stroke: none; r: 2.6; }
   [data-theme="night"] .legend .done { fill: #f4fbff; r: 3.2; filter: drop-shadow(0 0 3px var(--leaf)); }
@@ -191,9 +190,11 @@
   [data-theme="night"] .part-node path { fill: #cbbcff; stroke: none; filter: drop-shadow(0 0 4px #9b84ff); }
   [data-theme="night"] .part-node.selected path, [data-theme="night"] .part-node:focus-visible path { stroke: var(--pollen); stroke-width: 2; }
   [data-theme="night"] .part-label { fill: #b9b2ea; }
-  [data-theme="night"] .cluster-halo { fill: url(#cluster-glow); stroke: none; }
-  [data-theme="night"] .cluster.selected .cluster-halo, [data-theme="night"] .cluster:focus-visible .cluster-halo { stroke: var(--pollen); stroke-width: 1.5; }
-  [data-theme="night"] .cluster-star { fill: #f4fbff; filter: drop-shadow(0 0 2px var(--leaf)); }
+  [data-theme="night"] .part-star .rays { fill: var(--tint); stroke: none; filter: drop-shadow(0 0 5px var(--tint)); }
+  [data-theme="night"] .part-star .rays.second { fill: #ffffff; opacity: 0.55; filter: none; }
+  [data-theme="night"] .part-star .spikes { stroke: var(--tint); stroke-width: 0.6; opacity: 0.8; }
+  [data-theme="night"] .part-star .heart { fill: #ffffff; }
+  [data-theme="night"] .part-star.selected .rays, [data-theme="night"] .part-star:focus-visible .rays { stroke: var(--pollen); stroke-width: 1.5; }
   [data-theme="night"] .core { fill: #fff3d6; filter: drop-shadow(0 0 6px #fff) drop-shadow(0 0 18px rgba(255, 209, 102, 0.6)); }
   [data-theme="night"] .core-text { fill: #3a2c4a; }
   [data-theme="night"] .spore circle.shell { fill: url(#nebula); stroke: none; r: 20; }
@@ -314,12 +315,20 @@
 
   const HOP = 36;  // from a hub to the hub of a part inside it
 
-  // A part whose every step is done is closed: it shrinks into a cluster at its parent's hub.
+  // A part whose every step is done is closed: it shrinks into one star of its own.
+  // The only closed part at a trunk end sits on it; any other takes a small slot in the fan.
   function openParts(holder) { return (holder.parts || []).filter(p => !p.closed); }
   function closedParts(holder) { return (holder.parts || []).filter(p => p.closed); }
-  // Fan slots a branch or part needs: one per line, at least one per open part.
-  function leaves(holder) {
-    return holder.lines.length + openParts(holder).reduce((s, p) => s + Math.max(1, leaves(p)), 0);
+  function onHub(holder, depth) {
+    const closed = closedParts(holder);
+    return depth === 0 && closed.length === 1 ? closed[0] : null;
+  }
+  const STAR_SLOT = 1;
+  // Fan slots a branch or part needs: one per line or star, at least one per open part.
+  function leaves(holder, depth = 0) {
+    const stars = closedParts(holder).length - (onHub(holder, depth) ? 1 : 0);
+    return holder.lines.length + STAR_SLOT * stars
+      + openParts(holder).reduce((s, p) => s + Math.max(1, leaves(p, depth + 1)), 0);
   }
 
   function layout() {
@@ -340,20 +349,23 @@
       const sector = weight(branch) * unit;
       const angle = -Math.PI / 2 + (before + weight(branch) / 2 - weight(branches[0]) / 2) * unit;
       before += weight(branch);
-      return { branch, angle, hub: placeHub(branch, R_TRUNK, angle, sector * 0.6, 0, 0, gap) };
+      return { branch, angle, hub: placeHub(branch, R_TRUNK, angle, sector * 0.6, 0, gap) };
     });
   }
 
   // A hub is where a fan starts: the trunk end, or the node of an open part.
-  function placeHub(holder, r, angle, spread, depth, side, gap) {
+  function placeHub(holder, r, angle, spread, depth, gap) {
     const [x, y] = polar(r, angle);
+    const centred = onHub(holder, depth);
     const kids = [
       ...holder.lines.map(line => ({ line, w: 1 })),
-      ...openParts(holder).map(part => ({ part, w: Math.max(1, leaves(part)) })),
+      ...(holder.parts || []).filter(part => part !== centred).map(part => part.closed
+        ? { star: part, w: STAR_SLOT }
+        : { part, w: Math.max(1, leaves(part, depth + 1)) }),
     ];
     const total = kids.reduce((s, k) => s + k.w, 0);
     const inner = kids.length > 1 ? total - (kids[0].w + kids[kids.length - 1].w) / 2 : 1;
-    const hub = { x, y, angle, closed: closedParts(holder), lines: [], parts: [] };
+    const hub = { x, y, angle, centred, lines: [], parts: [], stars: [] };
     let before = 0;
     for (const kid of kids) {
       // Kid centres by weight, scaled so the outermost two sit at the edges of the spread.
@@ -362,11 +374,16 @@
       const offset = kids.length > 1 ? (centre / inner - 0.5) * spread : 0;
       const base = angle + offset;
       if (kid.line) {
-        // Lines of a fan curl away from its middle, so neighbours never cross.
-        const curl = kids.length > 1 ? Math.sign(offset) * 0.05 : (depth ? side * 0.04 : 0.06);
+        // Lines of a fan curl away from its middle, so neighbours never cross. Inside a part
+        // the slots are narrow, so lines run straight out from the core and keep their order.
+        const curl = depth ? 0 : (kids.length > 1 ? Math.sign(offset) * 0.05 : 0.06);
         hub.lines.push({ line: kid.line, steps: placeSteps(kid.line, r, base, curl, gap) });
+      } else if (kid.star) {
+        // Neighbouring stars alternate near and far, so their rays never touch.
+        const [sx, sy] = polar(r + (hub.stars.length % 2 ? 40 : 24), base);
+        hub.stars.push({ part: kid.star, x: sx, y: sy });
       } else {
-        const sub = placeHub(kid.part, r + HOP, base, spread * kid.w / total * 0.9, depth + 1, Math.sign(offset), gap);
+        const sub = placeHub(kid.part, r + HOP, base, spread * kid.w / total * 0.9, depth + 1, gap);
         hub.parts.push({ part: kid.part, hub: sub });
       }
     }
@@ -435,7 +452,11 @@
       drawHub(group, sub.hub, branch, sub.part, book, animate, reach);
       drawPartNode(group, sub.hub, branch, sub.part, reach);
     }
-    if (hub.closed.length) drawCluster(group, hub, branch, part !== null);
+    for (const star of hub.stars) {
+      el("path", { d: smoothPath([[hub.x, hub.y], [star.x, star.y]]), class: "stem" + book }, group);
+      drawPartStar(group, star.x, star.y, star.part, branch, 0.7);
+    }
+    if (hub.centred) drawPartStar(group, hub.x, hub.y, hub.centred, branch, 1);
   }
 
   const DIAMOND = "M0,-5.5 L5.5,0 L0,5.5 L-5.5,0Z";
@@ -454,7 +475,7 @@
       const a = Math.atan2(tip.y, tip.x);
       [x, y] = polar(Math.hypot(tip.x, tip.y) + 10, a);
       // The branch label goes beyond this one.
-      reach.r = Math.max(reach.r, Math.hypot(tip.x, tip.y) + 24);
+      reach.r = Math.max(reach.r, Math.hypot(tip.x, tip.y) + 36);
       anchor = Math.abs(Math.cos(a)) < 0.25 ? "middle" : (Math.cos(a) > 0 ? "start" : "end");
       y += Math.sin(a) < -0.6 ? -4 : (Math.sin(a) > 0.6 ? 10 : 4);
     } else {
@@ -474,29 +495,59 @@
     return [...part.lines.flatMap(l => walk(l.steps)), ...(part.parts || []).flatMap(partSteps)];
   }
 
-  // Closed parts as one cluster of small stars, laid out like seeds in a sunflower.
-  // Around a part's node the stars leave a hole, so the node stays visible on top.
-  function drawCluster(group, hub, branch, aroundNode) {
-    const steps = hub.closed.flatMap(partSteps);
+  // Each closed part becomes one star of its own, shaped and tinted from its path,
+  // so the same part always draws the same star.
+  const STAR_TINTS = ["#9fe6ff", "#ffd9a0", "#ffb8cc", "#cbbcff", "#a8f5d4", "#fff1c4"];
+  function drawPartStar(group, x, y, part, branch, scale) {
+    const rand = seeded(hashText(`${branch.repo}/${part.path}`));
+    const points = 4 + Math.floor(rand() * 5);
+    const outer = scale * (6 + 1.3 * Math.log2(1 + part.total));
+    const inner = outer * (0.3 + 0.18 * rand());
+    const turn = rand() * Math.PI;
     const g = el("g", {
-      class: "cluster", transform: `translate(${hub.x.toFixed(1)},${hub.y.toFixed(1)})`,
-      tabindex: 0, role: "button",
-      "aria-label": `${hub.closed.map(p => p.title).join(", ")}: closed, ${plural(steps.length, "step", "steps")} done`,
+      class: "part-star", transform: `translate(${x.toFixed(1)},${y.toFixed(1)})`,
+      style: `--tint: ${STAR_TINTS[Math.floor(rand() * STAR_TINTS.length)]}`,
+      tabindex: 0, role: "button", "aria-label": `${part.title}: closed, ${plural(part.total, "step", "steps")} done`,
     }, group);
-    const shown = Math.min(steps.length, 60), pitch = 2.4;
-    const hole = aroundNode ? (8 / pitch) ** 2 : 0.5;
-    el("circle", { r: (pitch * Math.sqrt(shown + hole) + 4).toFixed(1), class: "cluster-halo" }, g);
-    for (let k = 0; k < shown; k++) {
-      const [x, y] = polar(pitch * Math.sqrt(k + hole), k * 2.39996);
-      el("circle", { cx: x.toFixed(1), cy: y.toFixed(1), r: 1.5, class: "cluster-star" }, g);
+    if (rand() < 0.5) {
+      const reach = (outer * 1.7).toFixed(1);
+      el("path", { d: `M-${reach},0 H${reach} M0,-${reach} V${reach}`, class: "spikes", transform: `rotate(${(turn * 180 / Math.PI + 45).toFixed(1)})` }, g);
     }
-    // Roots of locked branches that wait for these steps grow from the cluster.
-    for (const step of steps) {
+    el("path", { d: starPath(points, outer, inner, turn), class: "rays" }, g);
+    if (rand() < 0.6) el("path", { d: starPath(points, outer * 0.55, inner * 0.7, turn + Math.PI / points), class: "rays second" }, g);
+    el("circle", { r: (inner * 0.5).toFixed(1), class: "heart" }, g);
+    // Locked branches that wait for these steps are placed by the star.
+    for (const step of partSteps(part)) {
       const key = `${branch.repo}|${step.id}`;
-      if (!stepIndex.has(key)) stepIndex.set(key, { x: hub.x, y: hub.y, step });
-      if (step.group) groupLast.set(`${branch.repo}|${step.group}`, { x: hub.x, y: hub.y });
+      if (!stepIndex.has(key)) stepIndex.set(key, { x, y, step });
+      if (step.group) groupLast.set(`${branch.repo}|${step.group}`, { x, y });
     }
-    bindSelect(g, () => showCluster(branch, hub.closed, g));
+    bindSelect(g, () => showClosed(branch, part, g));
+  }
+
+  function starPath(points, outer, inner, turn) {
+    let d = "";
+    for (let i = 0; i < points * 2; i++) {
+      const [x, y] = polar(i % 2 ? inner : outer, turn + (i * Math.PI) / points);
+      d += `${i ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`;
+    }
+    return d + "Z";
+  }
+
+  // A small seeded generator (mulberry32) and a string hash (FNV-1a) for shapes that never change.
+  function seeded(seed) {
+    let s = seed;
+    return () => {
+      s = (s + 0x6d2b79f5) | 0;
+      let t = Math.imul(s ^ (s >>> 15), 1 | s);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  function hashText(text) {
+    let h = 0x811c9dc5;
+    for (const ch of text) h = Math.imul(h ^ ch.codePointAt(0), 0x01000193);
+    return h >>> 0;
   }
 
   function grow(path, animate, delay) {
@@ -550,7 +601,6 @@
       ["stem-fade", "stem", { gradientUnits: "userSpaceOnUse", cx: 0, cy: 0, r: R_MAX }],
       ["core-halo", "halo", {}],
       ["nebula", "nebula", {}],
-      ["cluster-glow", "cluster", {}],
     ];
     for (const [id, stops, attrs] of gradients) {
       const g = el("radialGradient", { id, ...attrs }, defs);
@@ -626,15 +676,14 @@
       ${lines ? `<ul>${lines}</ul>` : `<p class="hint">No checklist here yet.</p>`}`;
   }
 
-  function showCluster(branch, parts, node) {
+  function showClosed(branch, part, node) {
     mark(node);
-    const items = parts.map(p => `<li>${esc(p.title)}<span class="req-status">${p.done} of ${p.total}</span>
-      <br><span class="hint">${partSteps(p).map(s => esc(s.id.includes(":") ? s.title : s.id)).join(", ")}</span></li>`).join("");
     panel.innerHTML = `
-      <h2>${parts.length === 1 ? esc(parts[0].title) : `${parts.length} closed parts`}</h2>
-      <p class="where">${esc(branch.title)}</p>
-      <span class="status done">Closed, every step done</span>
-      <ul>${items}</ul>`;
+      <h2>${esc(part.title)}</h2>
+      <p class="where">${esc(branch.title)}, ${esc(part.path)}</p>
+      <span class="status done">Closed, all ${plural(part.total, "step", "steps")} done</span>
+      <ul>${lineList(part)}</ul>
+      <p class="hint">${partSteps(part).map(s => esc(s.id.includes(":") ? s.title : s.id)).join(", ")}</p>`;
   }
 
   function showLocked(lock, node) {
@@ -676,7 +725,9 @@
       let angle = Math.hypot(sx, sy) > 0.3 ? Math.atan2(sy, sx) : (Math.PI / 4) + i * 0.7;
       angle += i * 0.18;
       const [x, y] = polar(R_SPORE, angle);
+      // A met requirement waits for nothing, so only open ones draw a root.
       for (const { r, p } of anchors) {
+        if (r.status === "met") continue;
         const mid = polar(R_MAX * 0.92, (Math.atan2(p.y, p.x) + angle) / 2 + (Math.abs(Math.atan2(p.y, p.x) - angle) > Math.PI ? Math.PI : 0));
         el("path", { d: `M${p.x.toFixed(1)},${p.y.toFixed(1)} Q${mid[0].toFixed(1)},${mid[1].toFixed(1)} ${x.toFixed(1)},${y.toFixed(1)}`, class: `root ${r.status}` }, group);
       }
@@ -757,7 +808,7 @@
   }, { passive: false });
   let drag = null;
   svg.addEventListener("pointerdown", e => {
-    if (e.target.closest(".node, .spore, .branch-label, .part-node, .cluster")) return;
+    if (e.target.closest(".node, .spore, .branch-label, .part-node, .part-star")) return;
     drag = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y };
     svg.setPointerCapture(e.pointerId);
     svg.classList.add("dragging");
@@ -781,7 +832,7 @@
       <ul>${current.map(({ b, steps }) => `<li>${esc(b.title)}<span class="req-status">${b.done} of ${b.total}</span>${steps.map(s => `<br><span class="hint">${esc(name(s))}</span>`).join("")}</li>`).join("")}</ul>
       <p class="hint">Built ${esc((data.generated_at || "").slice(0, 16).replace("T", " "))} from the progress files.</p>`;
   }
-  svg.addEventListener("click", e => { if (!e.target.closest(".node, .spore, .branch-label, .part-node, .cluster")) intro(); });
+  svg.addEventListener("click", e => { if (!e.target.closest(".node, .spore, .branch-label, .part-node, .part-star")) intro(); });
 
   const params = new URLSearchParams(location.search);
   let mode = params.get("mode") || readStore(MODE_KEY, "silhouettes");
@@ -796,13 +847,7 @@
   }
   // Night sky: two tiles of seeded stars, so the sky is the same on every load.
   function starTile(size, count, seed) {
-    let s = seed;
-    const rand = () => {
-      s = (s + 0x6d2b79f5) | 0;
-      let t = Math.imul(s ^ (s >>> 15), 1 | s);
-      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
+    const rand = seeded(seed);
     const tints = ["#ffffff", "#ffffff", "#ffffff", "#cfdcff", "#ffe6c0"];
     let dots = "";
     for (let i = 0; i < count; i++) {
