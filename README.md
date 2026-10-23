@@ -20,7 +20,7 @@ xdg-open out/index.html
 - The hub's `README.md`: a table whose header starts with `| Branch | Repository |`, one row per branch.
 - Each branch repository's `PROGRESS.md`: the checklist sections, `- [ ]` and `- [x]` items with optional `###` lines.
 - `tree.toml` in the hub, optional: locked branches and their prerequisites.
-- Subfolders with their own `PROGRESS.md`, optional: parts of a branch. A finished part shrinks into one star of its own, shaped from its name, and an open part forks into its own lines.
+- Subfolders with their own `PROGRESS.md`, optional: parts of a branch. A finished part shrinks into one star of its own, shaped from its name, and an open part forks into its own lines. Finished topics inside a part orbit it like moons, so a course of many lectures stays compact.
 
 The exact formats are in [docs/DATA.md](docs/DATA.md).
 

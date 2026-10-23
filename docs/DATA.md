@@ -125,7 +125,7 @@ Each branch has `parts`, empty when there are none, and each part has:
 - `closed` is true when the part, its own parts included, has at least one item and every item is done.
 - A lock's `step` is looked up in every part as well, so a step moved into a folder still meets its requirement. When two parts use the same ID, the requirement is met if either is done.
 
-The page draws an open part as a node from which its own lines fan out, and a closed part as one star whose shape and tint come from its path, so it never changes. The only closed part at the end of a trunk sits on it; any other closed part takes its own slot in its parent's fan, in name order.
+The page draws an open part as a node from which its own lines fan out, and a closed part as one star whose shape and tint come from its path, so it never changes. At the end of a trunk, the only closed part sits on it and several take slots in the fan. Inside a part, closed parts orbit its node in name order, six on the first ring, twelve on the second and so on, and the node becomes a sun: the star the part will be once closed. Closed topics therefore take no room in the fan however many there are.
 
 ## Books
 

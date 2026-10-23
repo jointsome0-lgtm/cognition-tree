@@ -125,9 +125,10 @@
   .spore.open text { fill: var(--peat); }
   .spore .spore-count { font: 12px var(--sans); }
   .part-node { cursor: pointer; }
-  .part-node path { fill: var(--lichen); stroke: var(--peat); stroke-width: 1.4; }
+  .part-node .diamond { fill: var(--lichen); stroke: var(--peat); stroke-width: 1.4; }
   .part-node:focus { outline: none; }
-  .part-node:focus-visible path, .part-node.selected path { stroke: var(--pollen); stroke-width: 2.5; }
+  .part-node:focus-visible .diamond, .part-node.selected .diamond { stroke: var(--pollen); stroke-width: 2.5; }
+  .orbit { fill: none; stroke: var(--fog); stroke-width: 0.6; stroke-dasharray: 2 3; opacity: 0.7; }
   .part-label { font: italic 400 12px var(--serif); fill: var(--peat-soft); paint-order: stroke; stroke: var(--lichen); stroke-width: 3px; pointer-events: none; }
   .part-star { cursor: pointer; }
   .part-star:focus { outline: none; }
@@ -187,8 +188,9 @@
   [data-theme="night"] .branch-label { fill: #ccd4ff; letter-spacing: 0.03em; }
   [data-theme="night"] .branch-count { fill: #737fb6; }
   [data-theme="night"] .root.open, [data-theme="night"] .root.unknown { stroke: #6f79b5; stroke-dasharray: 0.5 6; stroke-linecap: round; opacity: 0.75; }
-  [data-theme="night"] .part-node path { fill: #cbbcff; stroke: none; filter: drop-shadow(0 0 4px #9b84ff); }
-  [data-theme="night"] .part-node.selected path, [data-theme="night"] .part-node:focus-visible path { stroke: var(--pollen); stroke-width: 2; }
+  [data-theme="night"] .part-node .diamond { fill: #cbbcff; stroke: none; filter: drop-shadow(0 0 4px #9b84ff); }
+  [data-theme="night"] .part-node.selected .diamond, [data-theme="night"] .part-node:focus-visible .diamond { stroke: var(--pollen); stroke-width: 2; }
+  [data-theme="night"] .orbit { stroke: #8e9be0; stroke-dasharray: none; opacity: 0.22; }
   [data-theme="night"] .part-label { fill: #b9b2ea; }
   [data-theme="night"] .part-star .rays { fill: var(--tint); stroke: none; filter: drop-shadow(0 0 5px var(--tint)); }
   [data-theme="night"] .part-star .rays.second { fill: #ffffff; opacity: 0.55; filter: none; }
@@ -312,23 +314,47 @@
   const stepIndex = new Map();   // "repo|ID" -> {x, y, step}
   const groupLast = new Map();   // "repo|GROUP" -> {x, y}
   const branchTip = new Map();   // repo -> {x, y, angle}
+  const labels = [];             // branch label texts, kept clear of locked seeds
 
   const HOP = 36;  // from a hub to the hub of a part inside it
 
   // A part whose every step is done is closed: it shrinks into one star of its own.
-  // The only closed part at a trunk end sits on it; any other takes a small slot in the fan.
+  // At a trunk end the only closed part sits on the end, and several take slots in the fan.
+  // Inside a part they orbit its node, which turns from a diamond into a sun, so finished
+  // topics take no room in the fan however many there are.
   function openParts(holder) { return (holder.parts || []).filter(p => !p.closed); }
   function closedParts(holder) { return (holder.parts || []).filter(p => p.closed); }
   function onHub(holder, depth) {
     const closed = closedParts(holder);
     return depth === 0 && closed.length === 1 ? closed[0] : null;
   }
-  const STAR_SLOT = 1;
-  // Fan slots a branch or part needs: one per line or star, at least one per open part.
+  function orbiting(holder, depth) { return depth ? closedParts(holder) : []; }
+  // Fan slots a branch or part needs: one per line or root-level star, at least one per open part.
   function leaves(holder, depth = 0) {
-    const stars = closedParts(holder).length - (onHub(holder, depth) ? 1 : 0);
-    return holder.lines.length + STAR_SLOT * stars
+    const stars = depth ? 0 : closedParts(holder).length - (onHub(holder, depth) ? 1 : 0);
+    return holder.lines.length + stars
       + openParts(holder).reduce((s, p) => s + Math.max(1, leaves(p, depth + 1)), 0);
+  }
+
+  // Ring i holds 6(i + 1) stars, so rings fill from the inside out.
+  function sunSize(stars) { return 7 + 1.5 * Math.log2(1 + stars); }
+  function orbits(stars, core) {
+    const rings = [];
+    for (let i = 0, left = stars; left > 0; i++) {
+      rings.push({ r: core + 8 + 12 * i, n: Math.min(left, 6 * (i + 1)) });
+      left -= rings[i].n;
+    }
+    return rings;
+  }
+  // How far a hub's fan must start to clear its orbits.
+  function clearance(holder, depth) {
+    const n = orbiting(holder, depth).length;
+    return n ? orbits(n, sunSize(n)).at(-1).r + 10 : 0;
+  }
+  // From a hub to the node of an open part: past the hub's orbits, and far enough
+  // that the part's own orbits clear the hub and the star that may sit on it.
+  function hopTo(holder, part, depth) {
+    return Math.max(HOP, clearance(holder, depth) + 12, clearance(part, depth + 1) + 20);
   }
 
   function layout() {
@@ -338,12 +364,13 @@
     const unit = (2 * Math.PI) / Math.max(1, branches.reduce((s, b) => s + weight(b), 0));
     // One gap for every line, small enough for the longest line from wherever it starts.
     let gap = 30;
-    const fitGap = (holder, depth) => {
-      const start = R_TRUNK + depth * HOP + 24;
+    const fitGap = (holder, r, depth) => {
+      const clear = clearance(holder, depth);
+      const start = r + Math.max(24, clear);
       for (const l of holder.lines) if (l.steps.length) gap = Math.min(gap, (R_MAX - start) / l.steps.length);
-      for (const p of openParts(holder)) fitGap(p, depth + 1);
+      for (const p of openParts(holder)) fitGap(p, r + hopTo(holder, p, depth), depth + 1);
     };
-    for (const b of branches) fitGap(b, 0);
+    for (const b of branches) fitGap(b, R_TRUNK, 0);
     let before = 0;
     return branches.map(branch => {
       const sector = weight(branch) * unit;
@@ -357,15 +384,27 @@
   function placeHub(holder, r, angle, spread, depth, gap) {
     const [x, y] = polar(r, angle);
     const centred = onHub(holder, depth);
+    const moons = orbiting(holder, depth);
+    const clear = clearance(holder, depth);
     const kids = [
       ...holder.lines.map(line => ({ line, w: 1 })),
-      ...(holder.parts || []).filter(part => part !== centred).map(part => part.closed
-        ? { star: part, w: STAR_SLOT }
+      ...(holder.parts || []).filter(part => part !== centred && !moons.includes(part)).map(part => part.closed
+        ? { star: part, w: 1 }
         : { part, w: Math.max(1, leaves(part, depth + 1)) }),
     ];
     const total = kids.reduce((s, k) => s + k.w, 0);
     const inner = kids.length > 1 ? total - (kids[0].w + kids[kids.length - 1].w) / 2 : 1;
-    const hub = { x, y, angle, centred, lines: [], parts: [], stars: [] };
+    const sun = moons.length ? sunSize(moons.length) : 0;
+    const hub = { x, y, angle, centred, sun, lines: [], parts: [], stars: [], rings: [] };
+    // Moons go clockwise in name order, starting just past the stem that comes in.
+    let next = 0;
+    hub.rings = orbits(moons.length, sun).map((ring, i) => ({
+      r: ring.r,
+      moons: Array.from({ length: ring.n }, (_, k) => {
+        const a = angle + Math.PI + (k + 0.5) * 2 * Math.PI / ring.n + 0.3 * i;
+        return { part: moons[next++], x: x + ring.r * Math.cos(a), y: y + ring.r * Math.sin(a) };
+      }),
+    }));
     let before = 0;
     for (const kid of kids) {
       // Kid centres by weight, scaled so the outermost two sit at the edges of the spread.
@@ -377,24 +416,24 @@
         // Lines of a fan curl away from its middle, so neighbours never cross. Inside a part
         // the slots are narrow, so lines run straight out from the core and keep their order.
         const curl = depth ? 0 : (kids.length > 1 ? Math.sign(offset) * 0.05 : 0.06);
-        hub.lines.push({ line: kid.line, steps: placeSteps(kid.line, r, base, curl, gap) });
+        hub.lines.push({ line: kid.line, steps: placeSteps(kid.line, r + Math.max(24, clear), base, curl, gap) });
       } else if (kid.star) {
         // Neighbouring stars alternate near and far, so their rays never touch.
         const [sx, sy] = polar(r + (hub.stars.length % 2 ? 40 : 24), base);
         hub.stars.push({ part: kid.star, x: sx, y: sy });
       } else {
-        const sub = placeHub(kid.part, r + HOP, base, spread * kid.w / total * 0.9, depth + 1, gap);
+        const sub = placeHub(kid.part, r + hopTo(holder, kid.part, depth), base, spread * kid.w / total * 0.9, depth + 1, gap);
         hub.parts.push({ part: kid.part, hub: sub });
       }
     }
     return hub;
   }
 
-  function placeSteps(line, r0, base, curl, gap) {
+  function placeSteps(line, start, base, curl, gap) {
     return line.steps.map((step, k) => {
       const t = line.steps.length > 1 ? k / (line.steps.length - 1) : 0;
       const a = base + curl * Math.sin(t * Math.PI);
-      const r = r0 + 24 + k * gap;
+      const r = start + k * gap;
       const [x, y] = polar(r, a);
       const children = (step.children || []).map((child, c) => {
         const side = c % 2 === 0 ? 1 : -1;
@@ -420,13 +459,15 @@
     const dy = Math.sin(angle) < -0.6 ? -6 : (Math.sin(angle) > 0.6 ? 14 : 4);
     const label = el("text", { x: lx, y: ly + dy, "text-anchor": anchor, class: "branch-label" + book, tabindex: 0, role: "button" }, group);
     label.textContent = branch.book && branch.book.emblem ? `${branch.book.emblem} ${branch.title}` : branch.title;
-    el("text", { x: lx, y: ly + dy + 16, "text-anchor": anchor, class: "branch-count" }, group).textContent =
-      branch.found ? `${branch.done} of ${branch.total}` : "not found";
+    const count = el("text", { x: lx, y: ly + dy + 16, "text-anchor": anchor, class: "branch-count" }, group);
+    count.textContent = branch.found ? `${branch.done} of ${branch.total}` : "not found";
+    labels.push(label, count);
     bindSelect(label, () => showBranch(branch));
   }
 
   // `reach` tracks the outermost step for the branch label and the first current step for its tag.
   function drawHub(group, hub, branch, part, book, animate, reach) {
+    for (const ring of hub.rings) drawOrbit(group, hub.x, hub.y, ring.r);
     for (const sub of hub.parts) {
       grow(el("path", { d: smoothPath([[hub.x, hub.y], [sub.hub.x, sub.hub.y]]), class: "stem" + book }, group), animate, 0.2);
     }
@@ -457,15 +498,26 @@
       drawPartStar(group, star.x, star.y, star.part, branch, 0.7);
     }
     if (hub.centred) drawPartStar(group, hub.x, hub.y, hub.centred, branch, 1);
+    for (const ring of hub.rings) for (const moon of ring.moons) drawPartStar(group, moon.x, moon.y, moon.part, branch, 0.5);
+  }
+
+  function drawOrbit(group, x, y, r) {
+    el("circle", { cx: x.toFixed(1), cy: y.toFixed(1), r: r.toFixed(1), class: "orbit" }, group);
   }
 
   const DIAMOND = "M0,-5.5 L5.5,0 L0,5.5 L-5.5,0Z";
   function drawPartNode(group, hub, branch, part, reach) {
     const g = el("g", {
-      class: "part-node", transform: `translate(${hub.x.toFixed(1)},${hub.y.toFixed(1)})`,
+      class: hub.sun ? "part-node part-star sun" : "part-node",
+      transform: `translate(${hub.x.toFixed(1)},${hub.y.toFixed(1)})`,
       tabindex: 0, role: "button", "aria-label": `${part.title}, ${part.done} of ${part.total} steps done`,
     }, group);
-    el("path", { d: DIAMOND }, g);
+    el("title", {}, g).textContent = `${part.title}, ${part.done} of ${part.total}`;
+    bindSelect(g, () => showPart(branch, part, g));
+    // The sun is the star this part will be once closed, so it keeps its look. Its moons
+    // fill the space a label would need, so it is named by its tooltip and panel only.
+    if (hub.sun) { drawGlyph(g, `${branch.repo}/${part.path}`, hub.sun); return; }
+    el("path", { d: DIAMOND, class: "diamond" }, g);
     // The label goes past the tip of the part's own lines, where fans have room;
     // a part with no lines of its own is labelled beside its node.
     const tip = hub.lines.filter(l => l.steps.length).map(l => l.steps[l.steps.length - 1])
@@ -486,7 +538,6 @@
     // "Lecture 9 — Reductions" is drawn as "Lecture 9"; the panel shows the whole title.
     el("text", { x: x.toFixed(1), y: y.toFixed(1), "text-anchor": anchor, class: "part-label" }, tagLayer)
       .textContent = part.title.split(/\s+[—–]\s+/)[0];
-    bindSelect(g, () => showPart(branch, part, g));
   }
 
   // Every step of a part, its nested parts included.
@@ -496,26 +547,19 @@
   }
 
   // Each closed part becomes one star of its own, shaped and tinted from its path,
-  // so the same part always draws the same star.
-  const STAR_TINTS = ["#9fe6ff", "#ffd9a0", "#ffb8cc", "#cbbcff", "#a8f5d4", "#fff1c4"];
+  // so the same part always draws the same star. A closed part with parts of its own
+  // keeps them as moons.
   function drawPartStar(group, x, y, part, branch, scale) {
-    const rand = seeded(hashText(`${branch.repo}/${part.path}`));
-    const points = 4 + Math.floor(rand() * 5);
     const outer = scale * (6 + 1.3 * Math.log2(1 + part.total));
-    const inner = outer * (0.3 + 0.18 * rand());
-    const turn = rand() * Math.PI;
+    const moons = part.parts || [];
+    const rings = orbits(moons.length, outer);
+    for (const ring of rings) drawOrbit(group, x, y, ring.r);
     const g = el("g", {
       class: "part-star", transform: `translate(${x.toFixed(1)},${y.toFixed(1)})`,
-      style: `--tint: ${STAR_TINTS[Math.floor(rand() * STAR_TINTS.length)]}`,
       tabindex: 0, role: "button", "aria-label": `${part.title}: closed, ${plural(part.total, "step", "steps")} done`,
     }, group);
-    if (rand() < 0.5) {
-      const reach = (outer * 1.7).toFixed(1);
-      el("path", { d: `M-${reach},0 H${reach} M0,-${reach} V${reach}`, class: "spikes", transform: `rotate(${(turn * 180 / Math.PI + 45).toFixed(1)})` }, g);
-    }
-    el("path", { d: starPath(points, outer, inner, turn), class: "rays" }, g);
-    if (rand() < 0.6) el("path", { d: starPath(points, outer * 0.55, inner * 0.7, turn + Math.PI / points), class: "rays second" }, g);
-    el("circle", { r: (inner * 0.5).toFixed(1), class: "heart" }, g);
+    drawGlyph(g, `${branch.repo}/${part.path}`, outer);
+    el("title", {}, g).textContent = `${part.title}, closed`;
     // Locked branches that wait for these steps are placed by the star.
     for (const step of partSteps(part)) {
       const key = `${branch.repo}|${step.id}`;
@@ -523,6 +567,29 @@
       if (step.group) groupLast.set(`${branch.repo}|${step.group}`, { x, y });
     }
     bindSelect(g, () => showClosed(branch, part, g));
+    let next = 0;
+    rings.forEach((ring, i) => {
+      for (let k = 0; k < ring.n; k++) {
+        const a = (k + 0.5) * 2 * Math.PI / ring.n + 0.3 * i;
+        drawPartStar(group, x + ring.r * Math.cos(a), y + ring.r * Math.sin(a), moons[next++], branch, 0.5);
+      }
+    });
+  }
+
+  const STAR_TINTS = ["#9fe6ff", "#ffd9a0", "#ffb8cc", "#cbbcff", "#a8f5d4", "#fff1c4"];
+  function drawGlyph(g, seedText, outer) {
+    const rand = seeded(hashText(seedText));
+    const points = 4 + Math.floor(rand() * 5);
+    const inner = outer * (0.3 + 0.18 * rand());
+    const turn = rand() * Math.PI;
+    g.style.setProperty("--tint", STAR_TINTS[Math.floor(rand() * STAR_TINTS.length)]);
+    if (rand() < 0.5) {
+      const reach = (outer * 1.7).toFixed(1);
+      el("path", { d: `M-${reach},0 H${reach} M0,-${reach} V${reach}`, class: "spikes", transform: `rotate(${(turn * 180 / Math.PI + 45).toFixed(1)})` }, g);
+    }
+    el("path", { d: starPath(points, outer, inner, turn), class: "rays" }, g);
+    if (rand() < 0.6) el("path", { d: starPath(points, outer * 0.55, inner * 0.7, turn + Math.PI / points), class: "rays second" }, g);
+    el("circle", { r: (inner * 0.5).toFixed(1), class: "heart" }, g);
   }
 
   function starPath(points, outer, inner, turn) {
@@ -718,31 +785,54 @@
   function drawLocked(group, mode, animate) {
     const seen = new Set(readStore(SEEN_KEY, []));
     const visible = data.locked.filter(l => l.open || mode === "silhouettes");
+    const obstacles = labels.map(t => t.getBBox());
+    const overlaps = (a, b) => a.x < b.x + b.width + 4 && b.x < a.x + a.width + 4
+      && a.y < b.y + b.height + 4 && b.y < a.y + a.height + 4;
     visible.forEach((lock, i) => {
       const anchors = lock.requires.map(r => ({ r, p: anchorFor(r) })).filter(a => a.p);
       let sx = 0, sy = 0;
       for (const { p } of anchors) { const a = Math.atan2(p.y, p.x); sx += Math.cos(a); sy += Math.sin(a); }
       let angle = Math.hypot(sx, sy) > 0.3 ? Math.atan2(sy, sx) : (Math.PI / 4) + i * 0.7;
       angle += i * 0.18;
+      const named = lock.open || !lock.hidden;
+      const g = el("g", {
+        class: `spore${lock.open ? " open" : ""}`, tabindex: 0, role: "button",
+        "aria-label": `${named ? lock.title : "Hidden branch"}, ${lock.open ? "open" : `${lock.met} of ${lock.total} prerequisites met`}`,
+      }, group);
+      const shell = el("circle", { r: lock.open ? 13 : 11, class: "shell" }, g);
+      const words = [el("text", { y: 0 }, g), el("text", { y: 17, class: "spore-count" }, g)];
+      words[0].textContent = named ? lock.title : "???";
+      words[1].textContent = lock.open ? "open" : `${lock.met} of ${lock.total}`;
+      const place = a => {
+        const [x, y] = polar(R_SPORE, a);
+        g.setAttribute("transform", `translate(${x.toFixed(1)},${y.toFixed(1)})`);
+        for (const t of words) {
+          t.setAttribute("x", Math.cos(a) >= 0 ? 20 : -20);
+          t.setAttribute("text-anchor", Math.cos(a) >= 0 ? "start" : "end");
+        }
+        const b = g.getBBox();
+        return { x: x + b.x, y: y + b.y, width: b.width, height: b.height };
+      };
+      // Step along the rim, away from the first label or seed it covers, until it is clear.
+      let box = place(angle), step = 0;
+      for (let tries = 0; tries < 20; tries++) {
+        const hit = obstacles.find(o => overlaps(o, box));
+        if (!hit) break;
+        if (!step) {
+          const ha = Math.atan2(hit.y + hit.height / 2, hit.x + hit.width / 2);
+          step = Math.sin(angle - ha) >= 0 ? 0.05 : -0.05;
+        }
+        angle += step;
+        box = place(angle);
+      }
+      obstacles.push(box);
       const [x, y] = polar(R_SPORE, angle);
       // A met requirement waits for nothing, so only open ones draw a root.
       for (const { r, p } of anchors) {
         if (r.status === "met") continue;
         const mid = polar(R_MAX * 0.92, (Math.atan2(p.y, p.x) + angle) / 2 + (Math.abs(Math.atan2(p.y, p.x) - angle) > Math.PI ? Math.PI : 0));
-        el("path", { d: `M${p.x.toFixed(1)},${p.y.toFixed(1)} Q${mid[0].toFixed(1)},${mid[1].toFixed(1)} ${x.toFixed(1)},${y.toFixed(1)}`, class: `root ${r.status}` }, group);
+        group.insertBefore(el("path", { d: `M${p.x.toFixed(1)},${p.y.toFixed(1)} Q${mid[0].toFixed(1)},${mid[1].toFixed(1)} ${x.toFixed(1)},${y.toFixed(1)}`, class: `root ${r.status}` }), g);
       }
-      const named = lock.open || !lock.hidden;
-      const g = el("g", {
-        class: `spore${lock.open ? " open" : ""}`, transform: `translate(${x.toFixed(1)},${y.toFixed(1)})`,
-        tabindex: 0, role: "button",
-        "aria-label": `${named ? lock.title : "Hidden branch"}, ${lock.open ? "open" : `${lock.met} of ${lock.total} prerequisites met`}`,
-      }, group);
-      const shell = el("circle", { r: lock.open ? 13 : 11, class: "shell" }, g);
-      const anchor = Math.cos(angle) >= 0 ? "start" : "end";
-      const tx = Math.cos(angle) >= 0 ? 20 : -20;
-      el("text", { x: tx, y: 0, "text-anchor": anchor }, g).textContent = named ? lock.title : "???";
-      el("text", { x: tx, y: 17, "text-anchor": anchor, class: "spore-count" }, g).textContent =
-        lock.open ? "open" : `${lock.met} of ${lock.total}`;
       if (lock.open && !seen.has(lock.id)) {
         if (animate) shell.classList.add("bloom");
         seen.add(lock.id);
@@ -755,7 +845,7 @@
 
   function render(mode, animate) {
     svg.textContent = "";
-    stepIndex.clear(); groupLast.clear(); branchTip.clear();
+    stepIndex.clear(); groupLast.clear(); branchTip.clear(); labels.length = 0;
     drawGradients();
     const world = el("g", { id: "world" }, svg);
     el("circle", { r: R_CORE * 2.6, class: "halo" }, world);
