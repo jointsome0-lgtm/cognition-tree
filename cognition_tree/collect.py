@@ -167,6 +167,10 @@ def _walk(steps):
         yield from _walk(step["children"])
 
 
+def _has_part(parts: list[dict], path: str) -> bool:
+    return any(part["path"] == path or _has_part(part["parts"], path) for part in parts)
+
+
 def _items(repository: dict) -> list[dict]:
     """Every item of a repository or part, its nested parts included."""
     own = [step for line in repository["lines"] for step in _walk(line["steps"])]
@@ -283,6 +287,16 @@ def collect(root: str | Path, hub: str = "learning-hub") -> dict:
 
     for branch in branches:
         branch.update(repository(branch["repo"]))
+    def _grown(becomes: str | None) -> bool:
+        """True once the branch it becomes is drawn: a found branch, or a part of one."""
+        if not becomes:
+            return False
+        repo, _, path = becomes.partition("/")
+        branch = by_repo.get(repo)
+        if branch is None or not branch["found"]:
+            return False
+        return not path or _has_part(branch["parts"], path)
+
     locked = []
     for entry in locks.get("locked", []):
         requirements = []
@@ -307,10 +321,12 @@ def collect(root: str | Path, hub: str = "learning-hub") -> dict:
             }
         if "note" in entry:
             branch["note"] = _plain(entry["note"])
+        if "becomes" in entry:
+            branch["becomes"] = entry["becomes"].strip("/")
         met = sum(item["status"] == "met" for item in requirements)
         branch.update(
             requires=requirements, met=met, total=len(requirements),
-            open=met == len(requirements),
+            open=met == len(requirements), grown=_grown(branch.get("becomes")),
         )
         locked.append(branch)
 

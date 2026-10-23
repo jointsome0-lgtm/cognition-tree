@@ -31,6 +31,8 @@ A locked branch is drawn as a seed beyond the rim, with roots to the steps it st
 - **Show as silhouettes:** every locked branch is visible with a count such as "2 of 5". A branch marked `hidden` shows as "???" until it opens.
 - **Keep as a surprise:** locked branches are not drawn at all. A branch appears, with a short bloom, the first time it opens.
 
+When a locked branch says in `tree.toml` where it will grow (`becomes`, a repository or a folder in one) and that place has a progress file, its seed is gone and it grows there like any branch or part.
+
 ## Theme
 
 **Day** or **Night sky**, switched on the page and remembered. Night sky draws done steps as glowing stars on a starfield. Until a theme is chosen, the page follows the system's dark-mode setting; `?theme=night` or `?theme=day` in the address overrides both.

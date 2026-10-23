@@ -137,6 +137,7 @@
   .part-star .spikes { stroke: var(--peat); stroke-width: 0.7; opacity: 0.5; }
   .part-star .heart { fill: var(--lichen); }
   .part-star:focus-visible .rays, .part-star.selected .rays { stroke: var(--pollen); stroke-width: 2; }
+  .burst { fill: none; stroke: var(--pollen); stroke-width: 2.5; opacity: 0; pointer-events: none; }
   .core { fill: var(--peat); }
   .core-text { font: 400 13px var(--serif); fill: var(--lichen); pointer-events: none; }
 
@@ -213,6 +214,8 @@
       60% { transform: scale(1.35); opacity: 1; }
       100% { transform: scale(1); }
     }
+    .burst { animation: burst 1.8s ease-out 0.6s both; transform-box: fill-box; transform-origin: center; }
+    @keyframes burst { from { transform: scale(0.2); opacity: 1; } to { transform: scale(3); opacity: 0; } }
     [data-theme="night"] .node.current circle.ring {
       animation: twinkle 3.2s ease-in-out infinite; transform-box: fill-box; transform-origin: center;
     }
@@ -269,6 +272,9 @@
   const NS = "http://www.w3.org/2000/svg";
   const MODE_KEY = "cognition-tree:mode";
   const SEEN_KEY = "cognition-tree:opened";
+  const GROWN_KEY = "cognition-tree:grown";
+  // Locked branches that now grow as a branch or part of their own, by where they grew.
+  const grownInto = new Map(data.locked.filter(l => l.grown).map(l => [l.becomes, l]));
   const THEME_KEY = "cognition-tree:theme";
 
   const R_CORE = 34, R_TRUNK = 120, R_MAX = 440, R_SPORE = R_MAX + 92;
@@ -315,6 +321,7 @@
   const groupLast = new Map();   // "repo|GROUP" -> {x, y}
   const branchTip = new Map();   // repo -> {x, y, angle}
   const labels = [];             // branch label texts, kept clear of locked seeds
+  const hubAt = new Map();       // "repo" or "repo/path" -> {x, y}, where a branch or part grows
 
   const HOP = 36;  // from a hub to the hub of a part inside it
 
@@ -451,6 +458,7 @@
     const trunk = el("path", { d: smoothPath([polar(R_CORE, angle), [hub.x, hub.y]]), class: "stem trunk" + book + (branch.found ? "" : " missing") }, group);
     grow(trunk, animate, 0);
     const reach = { r: R_TRUNK, tip: [hub.x, hub.y], tagged: false };
+    hubAt.set(branch.repo, { x: hub.x, y: hub.y });
     drawHub(group, hub, branch, null, book, animate, reach);
     branchTip.set(branch.repo, { x: reach.tip[0], y: reach.tip[1], angle });
 
@@ -490,6 +498,7 @@
       if (r > reach.r) { reach.r = r; reach.tip = [last.x, last.y]; }
     }
     for (const sub of hub.parts) {
+      hubAt.set(`${branch.repo}/${sub.part.path}`, { x: sub.hub.x, y: sub.hub.y });
       drawHub(group, sub.hub, branch, sub.part, book, animate, reach);
       drawPartNode(group, sub.hub, branch, sub.part, reach);
     }
@@ -560,6 +569,7 @@
     }, group);
     drawGlyph(g, `${branch.repo}/${part.path}`, outer);
     el("title", {}, g).textContent = `${part.title}, closed`;
+    hubAt.set(`${branch.repo}/${part.path}`, { x, y });
     // Locked branches that wait for these steps are placed by the star.
     for (const step of partSteps(part)) {
       const key = `${branch.repo}|${step.id}`;
@@ -722,6 +732,14 @@
     }).join("");
   }
 
+  // Which steps opened a branch or part that grew from a locked seed.
+  function openedFrom(key) {
+    const lock = grownInto.get(key);
+    if (!lock || !lock.requires.length) return "";
+    const steps = lock.requires.map(r => r.label === r.step ? r.step : `${r.step} ${r.label}`);
+    return `<p class="hint">Opened from: ${steps.map(esc).join(", ")}</p>`;
+  }
+
   function showBranch(branch) {
     mark(null);
     const lines = lineList(branch);
@@ -729,6 +747,7 @@
       <h2>${esc(branch.book && branch.book.emblem ? `${branch.book.emblem} ${branch.title}` : branch.title)}</h2>
       ${branch.book ? `<p class="where">Book: ${esc(branch.book.title)}</p>` : ""}
       <p class="where">${branch.found ? `${branch.done} of ${branch.total} steps done` : "The repository or its progress file was not found."}</p>
+      ${openedFrom(branch.repo)}
       ${lines ? `<ul>${lines}</ul>` : ""}
       ${safeUrl(branch.url) ? `<p><a href="${esc(branch.url)}" target="_blank" rel="noopener">Open ${esc(branch.repo)}</a></p>` : ""}`;
   }
@@ -740,6 +759,7 @@
       <h2>${esc(part.title)}</h2>
       <p class="where">${esc(branch.title)}, ${esc(part.path)}</p>
       <span class="status current">${part.done} of ${part.total} steps done</span>
+      ${openedFrom(`${branch.repo}/${part.path}`)}
       ${lines ? `<ul>${lines}</ul>` : `<p class="hint">No checklist here yet.</p>`}`;
   }
 
@@ -749,6 +769,7 @@
       <h2>${esc(part.title)}</h2>
       <p class="where">${esc(branch.title)}, ${esc(part.path)}</p>
       <span class="status done">Closed, all ${plural(part.total, "step", "steps")} done</span>
+      ${openedFrom(`${branch.repo}/${part.path}`)}
       <ul>${lineList(part)}</ul>
       <p class="hint">${partSteps(part).map(s => esc(s.id.includes(":") ? s.title : s.id)).join(", ")}</p>`;
   }
@@ -784,7 +805,7 @@
 
   function drawLocked(group, mode, animate) {
     const seen = new Set(readStore(SEEN_KEY, []));
-    const visible = data.locked.filter(l => l.open || mode === "silhouettes");
+    const visible = data.locked.filter(l => !l.grown && (l.open || mode === "silhouettes"));
     const obstacles = labels.map(t => t.getBBox());
     const overlaps = (a, b) => a.x < b.x + b.width + 4 && b.x < a.x + a.width + 4
       && a.y < b.y + b.height + 4 && b.y < a.y + a.height + 4;
@@ -861,14 +882,30 @@
     el("text", { y: -2, "text-anchor": "middle", class: "core-text" }, world).textContent = `${done}`;
     el("text", { y: 13, "text-anchor": "middle", class: "core-text", "font-size": 10 }, world).textContent = `of ${total}`;
     drawLocked(roots, mode, animate);
+    drawGrown(world, animate);
     fit();
     applyView();
     summarize(mode, done, total);
   }
 
+  // A seed that grew into a branch or part is gone; a ring bursts where it grew, the first time.
+  function drawGrown(world, animate) {
+    const seen = new Set(readStore(GROWN_KEY, []));
+    for (const lock of grownInto.values()) {
+      const at = hubAt.get(lock.becomes);
+      if (!at || seen.has(lock.id)) continue;
+      seen.add(lock.id);
+      if (!animate) continue;
+      const ring = el("circle", { cx: at.x.toFixed(1), cy: at.y.toFixed(1), r: 18, class: "burst" }, world);
+      ring.addEventListener("animationend", () => ring.remove(), { once: true });
+    }
+    writeStore(GROWN_KEY, [...seen]);
+  }
+
   function summarize(mode, done, total) {
-    const sleeping = data.locked.filter(l => !l.open).length;
-    const opened = data.locked.length - sleeping;
+    const waiting = data.locked.filter(l => !l.grown);
+    const sleeping = waiting.filter(l => !l.open).length;
+    const opened = waiting.length - sleeping;
     let text = `${done} of ${plural(total, "step", "steps")} grown across ${plural(data.branches.length, "branch", "branches")}.`;
     if (opened) text += ` ${plural(opened, "locked branch has", "locked branches have")} opened.`;
     if (mode === "silhouettes" && sleeping) {

@@ -154,6 +154,7 @@ title = "Celestial navigation"
 hidden = false            # optional, default false
 note = "Lessons 1-3 first."   # optional
 source = { title = "A free course", url = "https://example.com/course" }
+becomes = "learn-sailing/celestial"   # optional: where it will grow once started
 
 [[locked.requires]]
 repo = "learn-astronomy"
@@ -174,6 +175,12 @@ A requirement's `status`:
 - `unknown` when the repository, its progress file or the step is not found. The page shows it as not yet on the map.
 
 A requirement may name any repository in the root, also one that is not a branch in the hub table. `met` counts requirements with status `met`; `open` on the locked branch is true when `met == total`.
+
+### Growing
+
+Once started, a locked branch lives somewhere real: its own repository, or a folder in an existing one. `becomes` names that place, as `repo` for a branch of its own or `repo/path` for a part (see [Parts](#parts)); the output repeats it without surrounding slashes. `grown` is true when that place is drawn: `repo` is a branch, from the hub table or a book, whose progress file was found, and `path`, if given, is one of its parts at any depth. A repository missing from the hub table is not drawn, so it does not count. `grown` is false when `becomes` is absent, and it does not depend on `open`, since the owner may start a branch early.
+
+A grown branch is no longer drawn as a seed: the page draws it where it grew, with a ring that bursts there the first time, and its panel lists the steps that opened it.
 
 ## Embedding
 

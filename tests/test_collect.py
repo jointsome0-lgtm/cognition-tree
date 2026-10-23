@@ -262,6 +262,37 @@ class PartsTests(unittest.TestCase):
         self.assertTrue(gate["open"])
 
 
+class GrownTests(unittest.TestCase):
+    """A locked branch names where it will live; it is grown once that exists."""
+
+    def collect_with(self, becomes: list[str]):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "root"
+            shutil.copytree(ROOT, root)
+            (root / "gear-lab" / "practice").mkdir()
+            (root / "gear-lab" / "practice" / "PROGRESS.md").write_text(
+                "## Checklist\n- [ ] W01 — First\n", encoding="utf-8")
+            config = root / "learning-hub" / "tree.toml"
+            config.write_text(config.read_text(encoding="utf-8") + "".join(
+                f'\n[[locked]]\nid = "lock-{n}"\ntitle = "Lock {n}"\nbecomes = "{target}"\n'
+                for n, target in enumerate(becomes)
+            ), encoding="utf-8")
+            return collect(root)["locked"][-len(becomes):]
+
+    def test_grown_when_the_target_is_drawn(self):
+        locks = self.collect_with([
+            "quiet-lab", "gear-lab/practice/", "absent-lab", "gear-lab/missing", "side-lab",
+        ])
+        self.assertEqual([lock["grown"] for lock in locks], [True, True, False, False, False])
+        self.assertEqual(locks[1]["becomes"], "gear-lab/practice")
+
+    def test_without_becomes_never_grown(self):
+        tree = collect(ROOT)
+        for lock in tree["locked"]:
+            self.assertFalse(lock["grown"])
+            self.assertNotIn("becomes", lock)
+
+
 class ArchiveTests(unittest.TestCase):
     LIVE = (
         "## Checklist\n"
