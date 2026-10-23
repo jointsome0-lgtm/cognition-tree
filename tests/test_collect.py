@@ -36,7 +36,7 @@ class CollectTests(unittest.TestCase):
         )
         for branch in self.tree["branches"]:
             self.assertEqual(set(branch), {
-                "id", "title", "repo", "url", "found", "lines", "done", "total",
+                "id", "title", "repo", "url", "found", "lines", "parts", "done", "total",
             })
             self.assertEqual(branch["id"], branch["repo"])
             self.assertEqual(branch["url"], f"https://example.invalid/{branch['repo']}")
@@ -122,6 +122,7 @@ class CollectTests(unittest.TestCase):
             "url": "https://example.invalid/absent-lab",
             "found": False,
             "lines": [],
+            "parts": [],
             "done": 0,
             "total": 0,
         })
@@ -190,6 +191,75 @@ class CollectTests(unittest.TestCase):
             tree = collect(root, "custom-hub")
             self.assertEqual(tree["locked"], [])
             self.assertEqual(tree["branches"], self.tree["branches"])
+
+
+class PartsTests(unittest.TestCase):
+    FILES = {
+        "PROGRESS.md": "# Progress\n\nOverview only: intro is closed, lectures are below.\n",
+        "intro/PROGRESS.md": "# Progress\n## Atomic checklist\n- [x] K01 — One\n- [x] M02 — Measure\n",
+        "deep/PROGRESS.md": "# Deep work\n",
+        "deep/lecture-10/PROGRESS.md": "## Checklist\n- [ ] T01 — Later\n",
+        "deep/lecture-2/PROGRESS.md": (
+            "# Lecture 2 — **Reductions**\n## Checklist\n- [x] R01 — Sum\n- [ ] R02 — Max\n"
+        ),
+        "deep/lecture-2/ARCHIVE.md": "## Archived checklist\n### Checklist\n- [x] R00 — Warm-up\n",
+        "deep/notes/extra/PROGRESS.md": "## Checklist\n- [ ] X01 — Through a plain folder\n",
+        ".hidden/PROGRESS.md": "## Checklist\n- [ ] H01 — Never read\n",
+        "_draft/PROGRESS.md": "## Checklist\n- [ ] D01 — Never read\n",
+    }
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name) / "root"
+        shutil.copytree(ROOT, self.root)
+        for name, text in self.FILES.items():
+            path = self.root / "quiet-lab" / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+        config = self.root / "learning-hub" / "tree.toml"
+        config.write_text(config.read_text(encoding="utf-8") + (
+            '\n[[locked]]\nid = "after-intro"\ntitle = "After intro"\n'
+            '\n[[locked.requires]]\nrepo = "quiet-lab"\nstep = "M02"\n'
+        ), encoding="utf-8")
+        self.tree = collect(self.root)
+        self.quiet = self.tree["branches"][2]
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_parts_nest_in_natural_order(self):
+        self.assertEqual(self.quiet["lines"], [])
+        deep, intro = self.quiet["parts"]
+        self.assertEqual((intro["path"], intro["title"]), ("intro", "intro"))
+        self.assertEqual((deep["path"], deep["title"]), ("deep", "Deep work"))
+        self.assertEqual(intro["parts"], [])
+        self.assertEqual(
+            [(part["path"], part["title"]) for part in deep["parts"]],
+            [
+                ("deep/lecture-2", "Lecture 2 — Reductions"),
+                ("deep/lecture-10", "lecture-10"),
+                ("deep/notes/extra", "extra"),
+            ],
+        )
+        for part in [intro, deep, *deep["parts"]]:
+            self.assertEqual(set(part), {
+                "path", "title", "lines", "parts", "done", "total", "closed",
+            })
+
+    def test_counts_closed_parts_and_archive(self):
+        deep, intro = self.quiet["parts"]
+        lecture = deep["parts"][0]
+        self.assertEqual([s["id"] for s in all_steps(lecture["lines"])], ["R00", "R01", "R02"])
+        self.assertEqual([s["id"] for s in all_steps(lecture["lines"]) if s["current"]], ["R02"])
+        self.assertEqual((intro["done"], intro["total"], intro["closed"]), (2, 2, True))
+        self.assertEqual((lecture["done"], lecture["total"], lecture["closed"]), (2, 3, False))
+        self.assertEqual((deep["done"], deep["total"], deep["closed"]), (2, 5, False))
+        self.assertEqual((self.quiet["done"], self.quiet["total"]), (4, 7))
+
+    def test_requirements_find_steps_inside_parts(self):
+        gate = self.tree["locked"][-1]
+        self.assertEqual(gate["requires"][0]["status"], "met")
+        self.assertTrue(gate["open"])
 
 
 class ArchiveTests(unittest.TestCase):

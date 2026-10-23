@@ -12,6 +12,10 @@ _SECTION = re.compile(r"^##(?:\s+(.*))?$")
 _LINE = re.compile(r"^###\s+(.+)$")
 _ITEM = re.compile(r"^( *)- \[([ xX])\]\s*(.*)$")
 _DASH = re.compile(r"\s*[—–]\s*|\s+-\s+")
+_TITLE = re.compile(r"^#\s+(.+)$", re.M)
+_DIGITS = re.compile(r"(\d+)")
+_PART_DEPTH = 4
+_NOT_PARTS = {"node_modules"}
 
 
 def _plain(text: str) -> str:
@@ -164,7 +168,63 @@ def _walk(steps):
 
 
 def _items(repository: dict) -> list[dict]:
-    return [step for line in repository["lines"] for step in _walk(line["steps"])]
+    """Every item of a repository or part, its nested parts included."""
+    own = [step for line in repository["lines"] for step in _walk(line["steps"])]
+    return own + [step for part in repository.get("parts", []) for step in _items(part)]
+
+
+def _read_lines(directory: Path) -> list[dict]:
+    lines = parse_progress((directory / "PROGRESS.md").read_text(encoding="utf-8"))
+    archive = directory / "ARCHIVE.md"
+    if archive.is_file():
+        lines = merge_archive(lines, parse_progress(archive.read_text(encoding="utf-8")))
+    return lines
+
+
+def _natural(path: Path) -> list:
+    """Sort key that puts lecture-2 before lecture-10."""
+    return [int(piece) if piece.isdigit() else piece for piece in _DIGITS.split(path.name)]
+
+
+def _part_title(directory: Path) -> str:
+    """The file's `#` heading, unless it only names the progress file."""
+    heading = _TITLE.search((directory / "PROGRESS.md").read_text(encoding="utf-8"))
+    title = _plain(heading[1]) if heading else ""
+    if not title or re.search(r"progress|прогресс", title, re.I):
+        return directory.name
+    return title
+
+
+def _parts(directory: Path, base: Path, depth: int = 1) -> list[dict]:
+    """Subdirectories with their own PROGRESS.md, in natural name order.
+
+    A directory without one is passed through, so its parts belong to the
+    nearest ancestor that has one. Hidden and underscored directories,
+    node_modules and symbolic links are skipped.
+    """
+    if depth > _PART_DEPTH:
+        return []
+    parts = []
+    subdirectories = [
+        path for path in directory.iterdir()
+        if path.is_dir() and not path.is_symlink()
+        and not path.name.startswith((".", "_")) and path.name not in _NOT_PARTS
+    ]
+    for sub in sorted(subdirectories, key=_natural):
+        if not (sub / "PROGRESS.md").is_file():
+            parts.extend(_parts(sub, base, depth + 1))
+            continue
+        part = {
+            "path": sub.relative_to(base).as_posix(),
+            "title": _part_title(sub),
+            "lines": _read_lines(sub),
+            "parts": _parts(sub, base, depth + 1),
+        }
+        items = _items(part)
+        done = sum(item["done"] for item in items)
+        part.update(done=done, total=len(items), closed=bool(items) and done == len(items))
+        parts.append(part)
+    return parts
 
 
 def _requirement_status(requirement: dict, repository: dict) -> str:
@@ -191,13 +251,13 @@ def collect(root: str | Path, hub: str = "learning-hub") -> dict:
 
     def repository(repo: str) -> dict:
         if repo not in cache:
-            progress = root / repo / "PROGRESS.md"
-            archive = root / repo / "ARCHIVE.md"
-            found = (root / repo).is_dir() and progress.is_file()
-            lines = parse_progress(progress.read_text(encoding="utf-8")) if found else []
-            if found and archive.is_file():
-                lines = merge_archive(lines, parse_progress(archive.read_text(encoding="utf-8")))
-            data = {"found": found, "lines": lines}
+            directory = root / repo
+            found = directory.is_dir() and (directory / "PROGRESS.md").is_file()
+            data = {
+                "found": found,
+                "lines": _read_lines(directory) if found else [],
+                "parts": _parts(directory, directory) if found else [],
+            }
             items = _items(data)
             data.update(done=sum(item["done"] for item in items), total=len(items))
             cache[repo] = data

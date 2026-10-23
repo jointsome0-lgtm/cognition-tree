@@ -10,6 +10,7 @@ All inputs are local files. Nothing is fetched from the network.
 - **Hub:** one repository in the root, `learning-hub` by default. Its `README.md` holds a Markdown table whose header row starts with `| Branch | Repository |`. Each row gives a branch title in the first cell and a link `[repo-name](url)` in the second; the order of rows is the order of branches. Other cells are ignored.
 - **Locks:** `tree.toml` in the hub, optional. See [Locks](#locks).
 - **Archive:** `ARCHIVE.md` in each repository, optional. See [Archive](#archive).
+- **Parts:** subdirectories of a repository with their own `PROGRESS.md`, optional. See [Parts](#parts).
 - **Progress:** `PROGRESS.md` in each repository. Only the checklist sections are read: a `##` heading whose text contains `checklist` (case-insensitive), except one whose text also contains `preserved`, and except one whose text contains `milestone` when the file has another checklist section, since milestones group the same steps. A section ends at the next `##` heading.
 
 ### Checklist lines
@@ -48,6 +49,7 @@ The build also embeds this object in the page.
           ]
         }
       ],
+      "parts": [],
       "done": 0,
       "total": 12
     }
@@ -71,7 +73,7 @@ The build also embeds this object in the page.
 ```
 
 - `found` is false when the repository directory or its `PROGRESS.md` is missing; `lines` is then empty.
-- `done` and `total` count all items, children included.
+- `done` and `total` count all items, children and parts included.
 - `archived` is present and true only on items that come from `ARCHIVE.md`.
 - `current` is true on the first item, in document order, that is not done, once per line. Children are not marked current.
 - Strings are copied from the files without Markdown links: `[text](url)` becomes `text`; backticks and `**` are removed.
@@ -88,6 +90,42 @@ A progress file may be shortened as the learner advances. A done item is then mo
 ```
 
 The build reads the archive like a progress file and keeps only done items whose ID is not in `PROGRESS.md`. Each is marked `archived`, children included, and is never `current`. The archived items of a line go before its live items, in archive order; a line found only in the archive goes before all live lines. An item that is not done in the archive is ignored.
+
+## Parts
+
+A repository may grow by folders: a closed stage moves into one folder, and the next stage keeps one folder per topic, each with its own `PROGRESS.md`, while the root `PROGRESS.md` keeps only an overview. For example:
+
+```
+learn-sailing/
+  PROGRESS.md                  overview, may have no checklist
+  basics/PROGRESS.md           every item done: a closed part
+  coastal/PROGRESS.md          overview of the topics below
+  coastal/02-tides/PROGRESS.md
+  coastal/10-pilotage/PROGRESS.md
+```
+
+Every subdirectory, to a depth of four, that has a `PROGRESS.md` is a part, read like the root file, with its own `ARCHIVE.md` if there is one. A directory without one is passed through: its parts belong to the nearest ancestor that has one. Hidden and underscored directories, `node_modules` and symbolic links are skipped. Parts are listed in natural name order, so `02-tides` comes before `10-pilotage`.
+
+Each branch has `parts`, empty when there are none, and each part has:
+
+```json
+{
+  "path": "coastal/02-tides",
+  "title": "Tides",
+  "lines": [],
+  "parts": [],
+  "done": 3,
+  "total": 5,
+  "closed": false
+}
+```
+
+- `path` is relative to the repository, with `/` separators.
+- `title` is the file's `#` heading, unless the heading is missing or contains "progress" or "прогресс"; then it is the directory name.
+- `closed` is true when the part, its own parts included, has at least one item and every item is done.
+- A lock's `step` is looked up in every part as well, so a step moved into a folder still meets its requirement. When two parts use the same ID, the requirement is met if either is done.
+
+The page draws a closed part as a cluster of small stars where its parent's stem forks, and an open part as a node from which its own lines fan out.
 
 ## Books
 

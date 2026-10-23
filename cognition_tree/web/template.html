@@ -125,6 +125,16 @@
   .spore text { font: 400 16px var(--serif); fill: var(--peat-soft); }
   .spore.open text { fill: var(--peat); }
   .spore .spore-count { font: 12px var(--sans); }
+  .part-node { cursor: pointer; }
+  .part-node path { fill: var(--lichen); stroke: var(--peat); stroke-width: 1.4; }
+  .part-node:focus { outline: none; }
+  .part-node:focus-visible path, .part-node.selected path { stroke: var(--pollen); stroke-width: 2.5; }
+  .part-label { font: italic 400 12px var(--serif); fill: var(--peat-soft); paint-order: stroke; stroke: var(--lichen); stroke-width: 3px; pointer-events: none; }
+  .cluster { cursor: pointer; }
+  .cluster:focus { outline: none; }
+  .cluster-halo { fill: var(--lichen-deep); stroke: var(--leaf); stroke-opacity: 0.5; }
+  .cluster-star { fill: var(--leaf); }
+  .cluster:focus-visible .cluster-halo, .cluster.selected .cluster-halo { stroke: var(--pollen); stroke-width: 2.5; stroke-opacity: 1; }
   .core { fill: var(--peat); }
   .core-text { font: 400 13px var(--serif); fill: var(--lichen); pointer-events: none; }
 
@@ -150,6 +160,8 @@
   .stop-halo-out { stop-color: #ffd166; stop-opacity: 0; }
   .stop-nebula-in { stop-color: #b9a2ff; stop-opacity: 0.6; }
   .stop-nebula-out { stop-color: #5b4bb0; stop-opacity: 0; }
+  .stop-cluster-in { stop-color: #9fe6ff; stop-opacity: 0.4; }
+  .stop-cluster-out { stop-color: #9fe6ff; stop-opacity: 0; }
   [data-theme="night"] .spark, [data-theme="night"] .halo { display: inline; }
   [data-theme="night"] .legend .open { fill: #8f9ad8; stroke: none; r: 2.6; }
   [data-theme="night"] .legend .done { fill: #f4fbff; r: 3.2; filter: drop-shadow(0 0 3px var(--leaf)); }
@@ -176,6 +188,12 @@
   [data-theme="night"] .branch-label { fill: #ccd4ff; letter-spacing: 0.03em; }
   [data-theme="night"] .branch-count { fill: #737fb6; }
   [data-theme="night"] .root.open, [data-theme="night"] .root.unknown { stroke: #6f79b5; stroke-dasharray: 0.5 6; stroke-linecap: round; opacity: 0.75; }
+  [data-theme="night"] .part-node path { fill: #cbbcff; stroke: none; filter: drop-shadow(0 0 4px #9b84ff); }
+  [data-theme="night"] .part-node.selected path, [data-theme="night"] .part-node:focus-visible path { stroke: var(--pollen); stroke-width: 2; }
+  [data-theme="night"] .part-label { fill: #b9b2ea; }
+  [data-theme="night"] .cluster-halo { fill: url(#cluster-glow); stroke: none; }
+  [data-theme="night"] .cluster.selected .cluster-halo, [data-theme="night"] .cluster:focus-visible .cluster-halo { stroke: var(--pollen); stroke-width: 1.5; }
+  [data-theme="night"] .cluster-star { fill: #f4fbff; filter: drop-shadow(0 0 2px var(--leaf)); }
   [data-theme="night"] .core { fill: #fff3d6; filter: drop-shadow(0 0 6px #fff) drop-shadow(0 0 18px rgba(255, 209, 102, 0.6)); }
   [data-theme="night"] .core-text { fill: #3a2c4a; }
   [data-theme="night"] .spore circle.shell { fill: url(#nebula); stroke: none; r: 20; }
@@ -294,72 +312,93 @@
   const groupLast = new Map();   // "repo|GROUP" -> {x, y}
   const branchTip = new Map();   // repo -> {x, y, angle}
 
+  const HOP = 36;  // from a hub to the hub of a part inside it
+
+  // A part whose every step is done is closed: it shrinks into a cluster at its parent's hub.
+  function openParts(holder) { return (holder.parts || []).filter(p => !p.closed); }
+  function closedParts(holder) { return (holder.parts || []).filter(p => p.closed); }
+  // Fan slots a branch or part needs: one per line, at least one per open part.
+  function leaves(holder) {
+    return holder.lines.length + openParts(holder).reduce((s, p) => s + Math.max(1, leaves(p)), 0);
+  }
+
   function layout() {
     const branches = data.branches;
     // A branch with more lines gets a wider sector, so its fan never crowds.
-    const weight = b => 1 + 0.5 * Math.max(0, b.lines.length - 1);
+    const weight = b => 1 + 0.5 * Math.max(0, leaves(b) - 1);
     const unit = (2 * Math.PI) / Math.max(1, branches.reduce((s, b) => s + weight(b), 0));
-    const longest = Math.max(1, ...branches.flatMap(b => b.lines.map(l => l.steps.length)));
-    const gap = Math.min(30, (R_MAX - R_TRUNK - 24) / longest);
+    // One gap for every line, small enough for the longest line from wherever it starts.
+    let gap = 30;
+    const fitGap = (holder, depth) => {
+      const start = R_TRUNK + depth * HOP + 24;
+      for (const l of holder.lines) if (l.steps.length) gap = Math.min(gap, (R_MAX - start) / l.steps.length);
+      for (const p of openParts(holder)) fitGap(p, depth + 1);
+    };
+    for (const b of branches) fitGap(b, 0);
     let before = 0;
-    return branches.map((branch, i) => {
+    return branches.map(branch => {
       const sector = weight(branch) * unit;
       const angle = -Math.PI / 2 + (before + weight(branch) / 2 - weight(branches[0]) / 2) * unit;
       before += weight(branch);
-      const lines = branch.lines.length ? branch.lines : [];
-      const spread = sector * 0.6;
-      const placed = lines.map((line, j) => {
-        const offset = lines.length > 1 ? (j / (lines.length - 1) - 0.5) * spread : 0;
-        const base = angle + offset;
+      return { branch, angle, hub: placeHub(branch, R_TRUNK, angle, sector * 0.6, 0, 0, gap) };
+    });
+  }
+
+  // A hub is where a fan starts: the trunk end, or the node of an open part.
+  function placeHub(holder, r, angle, spread, depth, side, gap) {
+    const [x, y] = polar(r, angle);
+    const kids = [
+      ...holder.lines.map(line => ({ line, w: 1 })),
+      ...openParts(holder).map(part => ({ part, w: Math.max(1, leaves(part)) })),
+    ];
+    const total = kids.reduce((s, k) => s + k.w, 0);
+    const inner = kids.length > 1 ? total - (kids[0].w + kids[kids.length - 1].w) / 2 : 1;
+    const hub = { x, y, angle, closed: closedParts(holder), lines: [], parts: [] };
+    let before = 0;
+    for (const kid of kids) {
+      // Kid centres by weight, scaled so the outermost two sit at the edges of the spread.
+      const centre = before + kid.w / 2 - kids[0].w / 2;
+      before += kid.w;
+      const offset = kids.length > 1 ? (centre / inner - 0.5) * spread : 0;
+      const base = angle + offset;
+      if (kid.line) {
         // Lines of a fan curl away from its middle, so neighbours never cross.
-        const curl = lines.length > 1 ? Math.sign(offset) * 0.05 : 0.06;
-        const steps = line.steps.map((step, k) => {
-          const t = line.steps.length > 1 ? k / (line.steps.length - 1) : 0;
-          const a = base + curl * Math.sin(t * Math.PI);
-          const r = R_TRUNK + 24 + k * gap;
-          const [x, y] = polar(r, a);
-          const children = (step.children || []).map((child, c) => {
-            const side = c % 2 === 0 ? 1 : -1;
-            const ca = a + side * (0.035 + 0.02 * Math.floor(c / 2));
-            const [cx, cy] = polar(r + 10 + 6 * Math.floor(c / 2), ca);
-            return { step: child, x: cx, y: cy, parent: [x, y] };
-          });
-          return { step, x, y, angle: a, children };
-        });
-        return { line, steps };
+        const curl = kids.length > 1 ? Math.sign(offset) * 0.05 : (depth ? side * 0.04 : 0.06);
+        hub.lines.push({ line: kid.line, steps: placeSteps(kid.line, r, base, curl, gap) });
+      } else {
+        const sub = placeHub(kid.part, r + HOP, base, spread * kid.w / total * 0.9, depth + 1, Math.sign(offset), gap);
+        hub.parts.push({ part: kid.part, hub: sub });
+      }
+    }
+    return hub;
+  }
+
+  function placeSteps(line, r0, base, curl, gap) {
+    return line.steps.map((step, k) => {
+      const t = line.steps.length > 1 ? k / (line.steps.length - 1) : 0;
+      const a = base + curl * Math.sin(t * Math.PI);
+      const r = r0 + 24 + k * gap;
+      const [x, y] = polar(r, a);
+      const children = (step.children || []).map((child, c) => {
+        const side = c % 2 === 0 ? 1 : -1;
+        const ca = a + side * (0.035 + 0.02 * Math.floor(c / 2));
+        const [cx, cy] = polar(r + 10 + 6 * Math.floor(c / 2), ca);
+        return { step: child, x: cx, y: cy, parent: [x, y] };
       });
-      return { branch, angle, lines: placed };
+      return { step, x, y, angle: a, children };
     });
   }
 
   function drawBranch(group, placed, animate) {
-    const { branch, angle, lines } = placed;
-    const trunkEnd = polar(R_TRUNK, angle);
+    const { branch, angle, hub } = placed;
     const book = branch.book ? " book" : "";
-    const trunk = el("path", { d: smoothPath([polar(R_CORE, angle), trunkEnd]), class: "stem trunk" + book + (branch.found ? "" : " missing") }, group);
+    const trunk = el("path", { d: smoothPath([polar(R_CORE, angle), [hub.x, hub.y]]), class: "stem trunk" + book + (branch.found ? "" : " missing") }, group);
     grow(trunk, animate, 0);
-    let tipR = R_TRUNK, tip = trunkEnd, tagged = false;
-    for (const { line, steps } of lines) {
-      if (!steps.length) continue;
-      const pts = [trunkEnd, ...steps.map(s => [s.x, s.y])];
-      grow(el("path", { d: smoothPath(pts), class: "stem" + book }, group), animate, 0.25);
-      for (const s of steps) for (const c of s.children) {
-        el("path", { d: `M${s.x.toFixed(1)},${s.y.toFixed(1)} L${c.x.toFixed(1)},${c.y.toFixed(1)}`, class: "stem", "stroke-width": 1 }, group);
-      }
-      for (const s of steps) {
-        s.tagged = s.step.current && !tagged;
-        if (s.tagged) tagged = true;
-        drawNode(group, s, branch, line, false);
-        for (const c of s.children) drawNode(group, c, branch, line, true);
-        if (s.step.group) groupLast.set(`${branch.repo}|${s.step.group}`, { x: s.x, y: s.y });
-      }
-      const last = steps[steps.length - 1];
-      const r = Math.hypot(last.x, last.y);
-      if (r > tipR) { tipR = r; tip = [last.x, last.y]; }
-    }
-    branchTip.set(branch.repo, { x: tip[0], y: tip[1], angle });
+    const reach = { r: R_TRUNK, tip: [hub.x, hub.y], tagged: false };
+    drawHub(group, hub, branch, null, book, animate, reach);
+    branchTip.set(branch.repo, { x: reach.tip[0], y: reach.tip[1], angle });
 
-    const [lx, ly] = polar(tipR + 26, angle);
+    const [lx, ly] = polar(reach.r + 26, angle);
     const anchor = Math.abs(Math.cos(angle)) < 0.25 ? "middle" : (Math.cos(angle) > 0 ? "start" : "end");
     const dy = Math.sin(angle) < -0.6 ? -6 : (Math.sin(angle) > 0.6 ? 14 : 4);
     const label = el("text", { x: lx, y: ly + dy, "text-anchor": anchor, class: "branch-label" + book, tabindex: 0, role: "button" }, group);
@@ -367,6 +406,97 @@
     el("text", { x: lx, y: ly + dy + 16, "text-anchor": anchor, class: "branch-count" }, group).textContent =
       branch.found ? `${branch.done} of ${branch.total}` : "not found";
     bindSelect(label, () => showBranch(branch));
+  }
+
+  // `reach` tracks the outermost step for the branch label and the first current step for its tag.
+  function drawHub(group, hub, branch, part, book, animate, reach) {
+    for (const sub of hub.parts) {
+      grow(el("path", { d: smoothPath([[hub.x, hub.y], [sub.hub.x, sub.hub.y]]), class: "stem" + book }, group), animate, 0.2);
+    }
+    for (const { line, steps } of hub.lines) {
+      if (!steps.length) continue;
+      const pts = [[hub.x, hub.y], ...steps.map(s => [s.x, s.y])];
+      grow(el("path", { d: smoothPath(pts), class: "stem" + book }, group), animate, 0.25);
+      for (const s of steps) for (const c of s.children) {
+        el("path", { d: `M${s.x.toFixed(1)},${s.y.toFixed(1)} L${c.x.toFixed(1)},${c.y.toFixed(1)}`, class: "stem", "stroke-width": 1 }, group);
+      }
+      for (const s of steps) {
+        s.tagged = s.step.current && !reach.tagged;
+        if (s.tagged) reach.tagged = true;
+        drawNode(group, s, branch, line, false, part);
+        for (const c of s.children) drawNode(group, c, branch, line, true, part);
+        if (s.step.group) groupLast.set(`${branch.repo}|${s.step.group}`, { x: s.x, y: s.y });
+      }
+      const last = steps[steps.length - 1];
+      const r = Math.hypot(last.x, last.y);
+      if (r > reach.r) { reach.r = r; reach.tip = [last.x, last.y]; }
+    }
+    for (const sub of hub.parts) {
+      drawHub(group, sub.hub, branch, sub.part, book, animate, reach);
+      drawPartNode(group, sub.hub, branch, sub.part, reach);
+    }
+    if (hub.closed.length) drawCluster(group, hub, branch, part !== null);
+  }
+
+  const DIAMOND = "M0,-5.5 L5.5,0 L0,5.5 L-5.5,0Z";
+  function drawPartNode(group, hub, branch, part, reach) {
+    const g = el("g", {
+      class: "part-node", transform: `translate(${hub.x.toFixed(1)},${hub.y.toFixed(1)})`,
+      tabindex: 0, role: "button", "aria-label": `${part.title}, ${part.done} of ${part.total} steps done`,
+    }, group);
+    el("path", { d: DIAMOND }, g);
+    // The label goes past the tip of the part's own lines, where fans have room;
+    // a part with no lines of its own is labelled beside its node.
+    const tip = hub.lines.filter(l => l.steps.length).map(l => l.steps[l.steps.length - 1])
+      .reduce((far, s) => (!far || Math.hypot(s.x, s.y) > Math.hypot(far.x, far.y) ? s : far), null);
+    let x, y, anchor;
+    if (tip) {
+      const a = Math.atan2(tip.y, tip.x);
+      [x, y] = polar(Math.hypot(tip.x, tip.y) + 10, a);
+      // The branch label goes beyond this one.
+      reach.r = Math.max(reach.r, Math.hypot(tip.x, tip.y) + 24);
+      anchor = Math.abs(Math.cos(a)) < 0.25 ? "middle" : (Math.cos(a) > 0 ? "start" : "end");
+      y += Math.sin(a) < -0.6 ? -4 : (Math.sin(a) > 0.6 ? 10 : 4);
+    } else {
+      const [nx, ny] = besideStem(hub.angle);
+      [x, y] = [hub.x + nx * 12, hub.y + ny * 12 + 4];
+      anchor = Math.abs(nx) < 0.5 ? "middle" : (nx > 0 ? "start" : "end");
+    }
+    // "Lecture 9 — Reductions" is drawn as "Lecture 9"; the panel shows the whole title.
+    el("text", { x: x.toFixed(1), y: y.toFixed(1), "text-anchor": anchor, class: "part-label" }, tagLayer)
+      .textContent = part.title.split(/\s+[—–]\s+/)[0];
+    bindSelect(g, () => showPart(branch, part, g));
+  }
+
+  // Every step of a part, its nested parts included.
+  function partSteps(part) {
+    const walk = steps => steps.flatMap(s => [s, ...walk(s.children || [])]);
+    return [...part.lines.flatMap(l => walk(l.steps)), ...(part.parts || []).flatMap(partSteps)];
+  }
+
+  // Closed parts as one cluster of small stars, laid out like seeds in a sunflower.
+  // Around a part's node the stars leave a hole, so the node stays visible on top.
+  function drawCluster(group, hub, branch, aroundNode) {
+    const steps = hub.closed.flatMap(partSteps);
+    const g = el("g", {
+      class: "cluster", transform: `translate(${hub.x.toFixed(1)},${hub.y.toFixed(1)})`,
+      tabindex: 0, role: "button",
+      "aria-label": `${hub.closed.map(p => p.title).join(", ")}: closed, ${plural(steps.length, "step", "steps")} done`,
+    }, group);
+    const shown = Math.min(steps.length, 60), pitch = 2.4;
+    const hole = aroundNode ? (8 / pitch) ** 2 : 0.5;
+    el("circle", { r: (pitch * Math.sqrt(shown + hole) + 4).toFixed(1), class: "cluster-halo" }, g);
+    for (let k = 0; k < shown; k++) {
+      const [x, y] = polar(pitch * Math.sqrt(k + hole), k * 2.39996);
+      el("circle", { cx: x.toFixed(1), cy: y.toFixed(1), r: 1.5, class: "cluster-star" }, g);
+    }
+    // Roots of locked branches that wait for these steps grow from the cluster.
+    for (const step of steps) {
+      const key = `${branch.repo}|${step.id}`;
+      if (!stepIndex.has(key)) stepIndex.set(key, { x: hub.x, y: hub.y, step });
+      if (step.group) groupLast.set(`${branch.repo}|${step.group}`, { x: hub.x, y: hub.y });
+    }
+    bindSelect(g, () => showCluster(branch, hub.closed, g));
   }
 
   function grow(path, animate, delay) {
@@ -379,7 +509,14 @@
     path.addEventListener("animationend", () => { path.style.strokeDasharray = ""; path.classList.remove("grow"); }, { once: true });
   }
 
-  function drawNode(group, placed, branch, line, isChild) {
+  // A unit normal to the stem, flipped to the side that reads best.
+  function besideStem(angle) {
+    let nx = -Math.sin(angle), ny = Math.cos(angle);
+    if (Math.abs(Math.cos(angle)) > 0.5 ? ny > 0 : nx < 0) { nx = -nx; ny = -ny; }
+    return [nx, ny];
+  }
+
+  function drawNode(group, placed, branch, line, isChild, part) {
     const { step, x, y } = placed;
     const status = stepStatus(step);
     const g = el("g", {
@@ -393,14 +530,14 @@
     el("circle", { r: isChild ? 3.6 : 5.6, class: "body" }, g);
     if (placed.tagged && !/:/.test(step.id)) {
       // Beside the stem, not along it, so the next nodes never cover the tag.
-      let nx = -Math.sin(placed.angle), ny = Math.cos(placed.angle);
-      if (Math.abs(Math.cos(placed.angle)) > 0.5 ? ny > 0 : nx < 0) { nx = -nx; ny = -ny; }
+      const [nx, ny] = besideStem(placed.angle);
       const anchor = Math.abs(nx) < 0.5 ? "middle" : (nx > 0 ? "start" : "end");
       const t = el("text", { x: (x + nx * 15).toFixed(1), y: (y + ny * 15 + 4).toFixed(1), "text-anchor": anchor, class: "tag" }, tagLayer);
       t.textContent = step.id;
     }
-    stepIndex.set(`${branch.repo}|${step.id}`, { x, y, step });
-    bindSelect(g, () => showStep(branch, line, step, g));
+    // Parts may reuse an ID; a lock's root goes to the first step drawn with it.
+    if (!stepIndex.has(`${branch.repo}|${step.id}`)) stepIndex.set(`${branch.repo}|${step.id}`, { x, y, step });
+    bindSelect(g, () => showStep(branch, line, step, g, part));
   }
 
   // A four-pointed star behind a done node.
@@ -413,6 +550,7 @@
       ["stem-fade", "stem", { gradientUnits: "userSpaceOnUse", cx: 0, cy: 0, r: R_MAX }],
       ["core-halo", "halo", {}],
       ["nebula", "nebula", {}],
+      ["cluster-glow", "cluster", {}],
     ];
     for (const [id, stops, attrs] of gradients) {
       const g = el("radialGradient", { id, ...attrs }, defs);
@@ -440,10 +578,10 @@
   }
   function safeUrl(u) { return /^https?:\/\//.test(u || "") ? u : null; }
 
-  function showStep(branch, line, step, node) {
+  function showStep(branch, line, step, node, part) {
     mark(node);
     const status = stepStatus(step);
-    const where = [branch.title, line.title].filter(Boolean).join(", ");
+    const where = [branch.title, part && part.title, line.title].filter(Boolean).join(", ");
     const id = /:/.test(step.id) ? "" : `${esc(step.id)} `;
     panel.innerHTML = `
       <h2>${id}${esc(step.title)}</h2>
@@ -452,21 +590,51 @@
       ${branch.url && safeUrl(branch.url) ? `<p><a href="${esc(branch.url)}" target="_blank" rel="noopener">Open ${esc(branch.repo)}</a></p>` : ""}`;
   }
 
-  function showBranch(branch) {
-    mark(null);
-    const lines = branch.lines.map(l => {
+  // Every line of a branch or part, nested parts included, with the part it belongs to.
+  function allLines(holder, part = null) {
+    return [...holder.lines.map(line => ({ line, part })), ...(holder.parts || []).flatMap(p => allLines(p, p))];
+  }
+  function lineList(holder) {
+    return allLines(holder).map(({ line: l, part }) => {
       const all = l.steps.flatMap(s => [s, ...(s.children || [])]);
       const done = all.filter(s => s.done).length;
       const cur = l.steps.find(s => s.current);
-      return `<li>${esc(l.title || "Steps")}<span class="req-status">${done} of ${all.length}</span>
+      const title = [part && part.title, l.title || "Steps"].filter(Boolean).join(" · ");
+      return `<li>${esc(title)}<span class="req-status">${done} of ${all.length}</span>
         ${cur ? `<br><span class="hint">Now: ${esc(cur.id.includes(":") ? cur.title : cur.id + " " + cur.title)}</span>` : ""}</li>`;
     }).join("");
+  }
+
+  function showBranch(branch) {
+    mark(null);
+    const lines = lineList(branch);
     panel.innerHTML = `
       <h2>${esc(branch.book && branch.book.emblem ? `${branch.book.emblem} ${branch.title}` : branch.title)}</h2>
       ${branch.book ? `<p class="where">Book: ${esc(branch.book.title)}</p>` : ""}
       <p class="where">${branch.found ? `${branch.done} of ${branch.total} steps done` : "The repository or its progress file was not found."}</p>
       ${lines ? `<ul>${lines}</ul>` : ""}
       ${safeUrl(branch.url) ? `<p><a href="${esc(branch.url)}" target="_blank" rel="noopener">Open ${esc(branch.repo)}</a></p>` : ""}`;
+  }
+
+  function showPart(branch, part, node) {
+    mark(node);
+    const lines = lineList(part);
+    panel.innerHTML = `
+      <h2>${esc(part.title)}</h2>
+      <p class="where">${esc(branch.title)}, ${esc(part.path)}</p>
+      <span class="status current">${part.done} of ${part.total} steps done</span>
+      ${lines ? `<ul>${lines}</ul>` : `<p class="hint">No checklist here yet.</p>`}`;
+  }
+
+  function showCluster(branch, parts, node) {
+    mark(node);
+    const items = parts.map(p => `<li>${esc(p.title)}<span class="req-status">${p.done} of ${p.total}</span>
+      <br><span class="hint">${partSteps(p).map(s => esc(s.id.includes(":") ? s.title : s.id)).join(", ")}</span></li>`).join("");
+    panel.innerHTML = `
+      <h2>${parts.length === 1 ? esc(parts[0].title) : `${parts.length} closed parts`}</h2>
+      <p class="where">${esc(branch.title)}</p>
+      <span class="status done">Closed, every step done</span>
+      <ul>${items}</ul>`;
   }
 
   function showLocked(lock, node) {
@@ -589,7 +757,7 @@
   }, { passive: false });
   let drag = null;
   svg.addEventListener("pointerdown", e => {
-    if (e.target.closest(".node, .spore, .branch-label")) return;
+    if (e.target.closest(".node, .spore, .branch-label, .part-node, .cluster")) return;
     drag = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y };
     svg.setPointerCapture(e.pointerId);
     svg.classList.add("dragging");
@@ -605,7 +773,7 @@
 
   function intro() {
     mark(null);
-    const current = data.branches.filter(b => b.found).map(b => ({ b, steps: b.lines.flatMap(l => l.steps.filter(s => s.current)) }));
+    const current = data.branches.filter(b => b.found).map(b => ({ b, steps: allLines(b).flatMap(({ line }) => line.steps.filter(s => s.current)) }));
     const name = s => s.id.includes(":") ? s.title : `${s.id} ${s.title}`;
     panel.innerHTML = `
       <h2>Where you are</h2>
@@ -613,7 +781,7 @@
       <ul>${current.map(({ b, steps }) => `<li>${esc(b.title)}<span class="req-status">${b.done} of ${b.total}</span>${steps.map(s => `<br><span class="hint">${esc(name(s))}</span>`).join("")}</li>`).join("")}</ul>
       <p class="hint">Built ${esc((data.generated_at || "").slice(0, 16).replace("T", " "))} from the progress files.</p>`;
   }
-  svg.addEventListener("click", e => { if (!e.target.closest(".node, .spore, .branch-label")) intro(); });
+  svg.addEventListener("click", e => { if (!e.target.closest(".node, .spore, .branch-label, .part-node, .cluster")) intro(); });
 
   const params = new URLSearchParams(location.search);
   let mode = params.get("mode") || readStore(MODE_KEY, "silhouettes");
