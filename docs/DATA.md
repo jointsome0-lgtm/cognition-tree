@@ -8,6 +8,7 @@ All inputs are local files. Nothing is fetched from the network.
 
 - **Root:** a directory that holds the repositories side by side, for example `~/learn`.
 - **Hub:** one repository in the root, `learning-hub` by default. Its `README.md` holds a Markdown table whose header row starts with `| Branch | Repository |`. Each row gives a branch title in the first cell and a link `[repo-name](url)` in the second; the order of rows is the order of branches. Other cells are ignored.
+- **Completed:** a second table in the hub, optional. See [Completed](#completed).
 - **Locks:** `tree.toml` in the hub, optional. See [Locks](#locks).
 - **Archive:** `ARCHIVE.md` in each repository, optional. See [Archive](#archive).
 - **Parts:** subdirectories of a repository with their own `PROGRESS.md`, optional. See [Parts](#parts).
@@ -77,6 +78,21 @@ The build also embeds this object in the page.
 - `archived` is present and true only on items that come from `ARCHIVE.md`.
 - `current` is true on the first item, in document order, that is not done, once per line. Children are not marked current.
 - Strings are copied from the files without Markdown links: `[text](url)` becomes `text`; backticks and `**` are removed.
+
+## Completed
+
+The hub's `README.md` may hold one more `| Branch | Repository |` table under a `##` heading that contains "completed", for example `## Completed branches`. Its rows are read like the main table and added after it; the third cell, if present, is the date, copied as text. A repository already in the main table keeps its row there and its completed row is ignored. Any other later table with the same header is still ignored.
+
+A branch from this table has two more keys:
+
+```json
+{"completed": "2026-11-03", "sky": true}
+```
+
+- `completed` is the third cell, or an empty string.
+- `sky` is true when the progress file was found, it has at least one item and every item is done. A new open step anywhere in the branch, a new part included, makes it false, with no change in the hub.
+
+Branches not in this table have neither key. The page draws a branch with `sky` true as a constellation above the tree: its closed parts in order, each the star or badge it has on the tree, joined by a line, or one star when it has no parts. It leaves a ring around the core, and its steps still count there and still meet locks. A branch with `sky` false grows on the tree like any other.
 
 ## Archive
 

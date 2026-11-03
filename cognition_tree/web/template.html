@@ -162,6 +162,25 @@
   .part-star:focus-visible .rays, .part-star.selected .rays { stroke: var(--pollen); stroke-width: 2; }
   .burst { fill: none; stroke: var(--pollen); stroke-width: 2.5; opacity: 0; pointer-events: none; }
   .core { fill: var(--peat); }
+  /* A completed branch leaves a ring on the trunk, as a year does, and goes to the sky. */
+  .year-ring { fill: none; stroke: var(--heartwood); stroke-width: 1.2; opacity: 0.7; pointer-events: none; }
+  /* Completed branches: a faint constellation behind the tree that wakes on hover. */
+  .sky { opacity: 0.85; transition: opacity 0.4s; }
+  .sky:hover, .sky:focus-within { opacity: 1; }
+  .sky-line { fill: none; stroke: var(--peat-soft); stroke-width: 0.7; stroke-opacity: 0.45; stroke-linejoin: round; }
+  .sky-star { cursor: pointer; }
+  .sky-star:focus { outline: none; }
+  .sky-glow { fill: var(--tint); opacity: 0; }
+  .sky-hit { fill: transparent; }
+  .sky-core, .sky-glow { transition: opacity 0.4s; }
+  .sky-badge { opacity: 0; transform: scale(0.6); transform-box: fill-box; transform-origin: center;
+    transition: opacity 0.4s, transform 0.4s; pointer-events: none; }
+  .sky:hover .sky-badge, .sky:focus-within .sky-badge { opacity: 1; transform: scale(1); }
+  .sky:hover .sky-core, .sky:focus-within .sky-core { opacity: 0; animation: none; }
+  .sky-core { fill: var(--tint, var(--peat)); stroke: var(--peat); stroke-width: 0.6; }
+  .sky-star.selected .sky-core, .sky-star:focus-visible .sky-core { fill: var(--pollen); }
+  .sky-label { font: 400 12px var(--serif); letter-spacing: 0.42em; fill: var(--peat-soft); cursor: pointer; }
+  .sky-date { font: 10px var(--sans); letter-spacing: 0.12em; fill: var(--fog); pointer-events: none; }
   .core-text { font: 400 13px var(--serif); fill: var(--lichen); pointer-events: none; }
 
   [data-theme="night"] body {
@@ -225,6 +244,16 @@
   [data-theme="night"] .part-star.selected .rays, [data-theme="night"] .part-star:focus-visible .rays { stroke: var(--pollen); stroke-width: 1.5; }
   [data-theme="night"] .core { fill: #fff3d6; filter: drop-shadow(0 0 6px #fff) drop-shadow(0 0 18px rgba(255, 209, 102, 0.6)); }
   [data-theme="night"] .core-text { fill: #3a2c4a; }
+  [data-theme="night"] .year-ring { stroke: #ffe2bd; opacity: 0.45; filter: drop-shadow(0 0 3px #d9a46c); }
+  [data-theme="night"] .sky-line { stroke: #c9d2ff; stroke-opacity: 0.28; }
+  [data-theme="night"] .sky-core { fill: #ffffff; stroke: none; filter: drop-shadow(0 0 2px #fff) drop-shadow(0 0 5px var(--tint)); }
+  [data-theme="night"] .sky-glow { opacity: 0.22; }
+  [data-theme="night"] .sky-badge { filter: drop-shadow(0 0 4px var(--tint)); }
+  [data-theme="night"] .sky-star .sky-core { animation: sky-twinkle var(--beat, 4s) ease-in-out var(--delay, 0s) infinite; }
+  @keyframes sky-twinkle { 50% { opacity: 0.6; } }
+  [data-theme="night"] .sky-label { fill: #aab3e6; }
+  [data-theme="night"] .sky-date { fill: #6f79b5; }
+  @media (prefers-reduced-motion: reduce) { .sky-star .sky-core { animation: none; } }
   [data-theme="night"] .spore circle.shell { fill: url(#nebula); stroke: none; r: 20; }
   [data-theme="night"] .spore.open circle.shell { fill: var(--pollen); r: 12; filter: drop-shadow(0 0 8px var(--pollen)); }
   [data-theme="night"] .spore text { fill: #aab3e6; }
@@ -302,7 +331,10 @@
   const grownInto = new Map(data.locked.filter(l => l.grown).map(l => [l.becomes, l]));
   const THEME_KEY = "cognition-tree:theme";
 
-  const R_CORE = 34, R_TRUNK = 120, R_MAX = 440, R_SPORE = R_MAX + 92;
+  const R_CORE = 34, R_TRUNK = 120, R_MAX = 440, R_SPORE = R_MAX + 92, R_SKY = R_SPORE + 80;
+  // A branch listed as completed with every step done is drawn in the sky, not on the tree.
+  const treeBranches = data.branches.filter(b => !b.sky);
+  const skyBranches = data.branches.filter(b => b.sky);
 
   function el(name, attrs = {}, parent) {
     const node = document.createElementNS(NS, name);
@@ -392,7 +424,7 @@
   }
 
   function layout() {
-    const branches = data.branches;
+    const branches = treeBranches;
     // A branch with more lines gets a wider sector, so its fan never crowds.
     const weight = b => 1 + 0.5 * Math.max(0, leaves(b) - 1);
     const unit = (2 * Math.PI) / Math.max(1, branches.reduce((s, b) => s + weight(b), 0));
@@ -883,6 +915,14 @@
     return `<p class="hint">Opened from: ${steps.map(esc).join(", ")}</p>`;
   }
 
+  function completedNote(branch) {
+    if (!("completed" in branch)) return "";
+    const when = branch.completed ? ` ${esc(branch.completed)}` : "";
+    return branch.sky
+      ? `<span class="status done">Completed${when}</span><p class="hint">In the sky until a new step opens; then it grows on the tree again.</p>`
+      : `<p class="hint">Listed as completed${when}, but a step is open again, so it grows on the tree.</p>`;
+  }
+
   function showBranch(branch) {
     mark(null);
     const lines = lineList(branch);
@@ -890,6 +930,7 @@
       <h2>${iconTag(branch.icon)}${esc(branch.book && branch.book.emblem ? `${branch.book.emblem} ${branch.title}` : branch.title)}</h2>
       ${branch.book ? `<p class="where">Book: ${esc(branch.book.title)}</p>` : ""}
       <p class="where">${branch.found ? `${branch.done} of ${branch.total} steps done` : "The repository or its progress file was not found."}</p>
+      ${completedNote(branch)}
       ${openedFrom(branch.repo)}
       ${lines ? `<ul>${lines}</ul>` : ""}
       ${safeUrl(branch.url) ? `<p><a href="${esc(branch.url)}" target="_blank" rel="noopener">Open ${esc(branch.repo)}</a></p>` : ""}`;
@@ -1008,18 +1049,118 @@
     return visible.length;
   }
 
+  // A completed branch becomes a constellation in the background above the tree: one point
+  // of light per closed part, in their order, along a seeded bent path like a real figure,
+  // so the same branch always draws the same constellation. Badges stay in the panel.
+  function drawSky(group) {
+    const n = skyBranches.length;
+    skyBranches.forEach((branch, i) => {
+      const angle = -Math.PI / 2 + (i - (n - 1) / 2) * 0.5;
+      const [cx, cy] = polar(R_SKY, angle);
+      const parts = closedParts(branch);
+      const members = parts.length ? parts : [{ path: "", title: branch.title, total: branch.total, lines: branch.lines, parts: [] }];
+      const rand = seeded(hashText(`sky:${branch.repo}`));
+      // A random walk with bounded turns: long enough to read as a figure, never a straight row.
+      let heading = rand() * 2 * Math.PI, x = 0, y = 0;
+      const points = members.map((part, k) => {
+        if (k) {
+          heading += (rand() < 0.5 ? -1 : 1) * (0.5 + 0.9 * rand());
+          const step = 46 + 26 * rand();
+          x += step * Math.cos(heading); y += step * Math.sin(heading);
+        }
+        return [x, y];
+      });
+      const mx = (Math.min(...points.map(p => p[0])) + Math.max(...points.map(p => p[0]))) / 2;
+      const my = (Math.min(...points.map(p => p[1])) + Math.max(...points.map(p => p[1]))) / 2;
+      for (const p of points) { p[0] += cx - mx; p[1] += cy - my; }
+      const figure = el("g", { class: "sky" }, group);
+      el("path", { d: points.map((p, k) => `${k ? "L" : "M"}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" "), class: "sky-line" }, figure);
+      members.forEach((part, k) => {
+        const [px, py] = points[k];
+        const tint = STAR_TINTS[Math.floor(seeded(hashText(`${branch.repo}/${part.path}`))() * STAR_TINTS.length)];
+        const g = el("g", {
+          class: "sky-star", transform: `translate(${px.toFixed(1)},${py.toFixed(1)})`, tabindex: 0, role: "button",
+          "aria-label": `${branch.title}, ${part.title}: closed`,
+        }, figure);
+        g.style.setProperty("--tint", tint);
+        const r = 2 + 0.6 * Math.log2(1 + part.total);
+        el("circle", { r: (r * 3.2).toFixed(1), class: "sky-glow" }, g);
+        el("circle", { r: r.toFixed(1), class: "sky-core" }, g);
+        el("circle", { r: 10, class: "sky-hit" }, g);
+        // The part's badge waits behind its star, as a figure over a star in an old atlas,
+        // and lends the star its colour.
+        if (part.icon) {
+          const size = 26;
+          el("image", { href: part.icon, x: -size / 2, y: -size / 2, width: size, height: size, class: "sky-badge" }, g);
+          badgeTint(part.icon).then(c => { if (c) g.style.setProperty("--tint", c); });
+        }
+        el("title", {}, g).textContent = `${part.title}, closed`;
+        const beat = seeded(hashText(`twinkle:${branch.repo}/${part.path}`));
+        g.style.setProperty("--beat", `${(3 + 3 * beat()).toFixed(2)}s`);
+        g.style.setProperty("--delay", `${(-6 * beat()).toFixed(2)}s`);
+        bindSelect(g, () => parts.length ? showClosed(branch, part, g) : showBranch(branch));
+        // Locked branches that wait for these steps grow their roots from here.
+        for (const step of partSteps(part)) {
+          const key = `${branch.repo}|${step.id}`;
+          if (!stepIndex.has(key)) stepIndex.set(key, { x: px, y: py, step });
+        }
+      });
+      branchTip.set(branch.repo, { x: cx, y: cy, angle });
+      const bottom = Math.max(...points.map(p => p[1]));
+      const label = el("text", { x: cx.toFixed(1), y: (bottom + 30).toFixed(1), "text-anchor": "middle", class: "sky-label", tabindex: 0, role: "button" }, figure);
+      label.textContent = branch.title.toUpperCase();
+      const date = el("text", { x: cx.toFixed(1), y: (bottom + 44).toFixed(1), "text-anchor": "middle", class: "sky-date" }, figure);
+      date.textContent = branch.completed || "completed";
+      labels.push(label, date);
+      bindSelect(label, () => showBranch(branch));
+    });
+  }
+
+  // The main colour of a badge: the mean of its saturated, opaque pixels, or null.
+  const tintCache = new Map();
+  function badgeTint(src) {
+    if (!tintCache.has(src)) tintCache.set(src, new Promise(resolve => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const n = 32, canvas = document.createElement("canvas");
+          canvas.width = canvas.height = n;
+          const ctx = canvas.getContext("2d", { willReadFrequently: true });
+          ctx.drawImage(img, 0, 0, n, n);
+          const px = ctx.getImageData(0, 0, n, n).data;
+          let r = 0, g = 0, b = 0, w = 0;
+          for (let i = 0; i < px.length; i += 4) {
+            if (px[i + 3] < 160) continue;
+            const hi = Math.max(px[i], px[i + 1], px[i + 2]), lo = Math.min(px[i], px[i + 1], px[i + 2]);
+            const sat = hi ? (hi - lo) / hi : 0;
+            if (sat < 0.3 || hi < 60) continue;
+            r += px[i] * sat; g += px[i + 1] * sat; b += px[i + 2] * sat; w += sat;
+          }
+          resolve(w ? `rgb(${Math.round(r / w)},${Math.round(g / w)},${Math.round(b / w)})` : null);
+        } catch { resolve(null); }
+      };
+      img.onerror = () => resolve(null);
+      img.src = src;
+    }));
+    return tintCache.get(src);
+  }
+
   function render(mode, animate) {
     svg.textContent = "";
     stepIndex.clear(); groupLast.clear(); branchTip.clear(); labels.length = 0; orbiters.length = 0;
     drawGradients();
     const world = el("g", { id: "world" }, svg);
     el("circle", { r: R_CORE * 2.6, class: "halo" }, world);
+    drawSky(el("g", {}, world));
     const roots = el("g", {}, world);
     const stems = el("g", {}, world);
     const tags = el("g", {});
     tagLayer = tags;
     for (const placed of layout()) drawBranch(stems, placed, animate);
     world.appendChild(tags);
+    skyBranches.forEach((b, i) => {
+      el("title", {}, el("circle", { r: R_CORE + 5 + 4 * i, class: "year-ring" }, world)).textContent = `${b.title}, completed`;
+    });
     el("circle", { r: R_CORE, class: "core" }, world);
     const done = data.branches.reduce((s, b) => s + b.done, 0);
     const total = data.branches.reduce((s, b) => s + b.total, 0);
@@ -1050,7 +1191,8 @@
     const waiting = data.locked.filter(l => !l.grown);
     const sleeping = waiting.filter(l => !l.open).length;
     const opened = waiting.length - sleeping;
-    let text = `${done} of ${plural(total, "step", "steps")} grown across ${plural(data.branches.length, "branch", "branches")}.`;
+    let text = `${done} of ${plural(total, "step", "steps")} grown across ${plural(treeBranches.length, "branch", "branches")}.`;
+    if (skyBranches.length) text += ` ${plural(skyBranches.length, "completed branch is", "completed branches are")} in the sky.`;
     if (opened) text += ` ${plural(opened, "locked branch has", "locked branches have")} opened.`;
     if (mode === "silhouettes" && sleeping) {
       text += opened ? ` ${plural(sleeping, "more is", "more are")} still locked.`
@@ -1079,7 +1221,7 @@
   }, { passive: false });
   let drag = null;
   svg.addEventListener("pointerdown", e => {
-    if (e.target.closest(".node, .spore, .branch-label, .part-node, .part-star")) return;
+    if (e.target.closest(".node, .spore, .branch-label, .part-node, .part-star, .sky-star, .sky-label")) return;
     drag = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y };
     svg.setPointerCapture(e.pointerId);
     svg.classList.add("dragging");
@@ -1095,15 +1237,16 @@
 
   function intro() {
     mark(null);
-    const current = data.branches.filter(b => b.found).map(b => ({ b, steps: allLines(b).flatMap(({ line }) => line.steps.filter(s => s.current)) }));
+    const current = treeBranches.filter(b => b.found).map(b => ({ b, steps: allLines(b).flatMap(({ line }) => line.steps.filter(s => s.current)) }));
     const name = s => s.id.includes(":") ? s.title : `${s.id} ${s.title}`;
     panel.innerHTML = `
       <h2>Where you are</h2>
       <p class="where">Pick any node, branch name or locked seed to read it.</p>
       <ul>${current.map(({ b, steps }) => `<li>${esc(b.title)}<span class="req-status">${b.done} of ${b.total}</span>${steps.map(s => `<br><span class="hint">${esc(name(s))}</span>`).join("")}</li>`).join("")}</ul>
+      ${skyBranches.length ? `<p class="hint">In the sky: ${skyBranches.map(b => esc(b.title)).join(", ")}.</p>` : ""}
       <p class="hint">Built ${esc((data.generated_at || "").slice(0, 16).replace("T", " "))} from the progress files.</p>`;
   }
-  svg.addEventListener("click", e => { if (!e.target.closest(".node, .spore, .branch-label, .part-node, .part-star")) intro(); });
+  svg.addEventListener("click", e => { if (!e.target.closest(".node, .spore, .branch-label, .part-node, .part-star, .sky-star, .sky-label")) intro(); });
 
   const params = new URLSearchParams(location.search);
   let mode = params.get("mode") || readStore(MODE_KEY, "silhouettes");

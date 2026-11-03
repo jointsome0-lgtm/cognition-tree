@@ -27,33 +27,49 @@ def _plain(text: str) -> str:
     return _LINK.sub(r"\1", text).replace("`", "").replace("**", "").strip()
 
 
-def _branches(readme: Path) -> list[dict]:
+def _row(cells: list[str]) -> dict | None:
+    link = _LINK.search(cells[1]) if len(cells) >= 2 else None
+    if not link:
+        return None
+    repo = _plain(link[1])
+    return {"id": repo, "title": _plain(cells[0]), "repo": repo, "url": link[2]}
+
+
+def _branches(readme: Path) -> tuple[list[dict], list[dict]]:
+    """The first hub table, and the table of completed branches if there is one.
+
+    The completed table is the first `| Branch | Repository |` table under a `##`
+    heading that contains "completed"; its third cell, if any, is kept as the date.
+    """
     if not readme.is_file():
         raise ValueError(f"Hub table is missing: {readme}")
-    in_table = False
-    branches = []
+    active, completed = None, None
+    table, heading = None, ""
     for line in readme.read_text(encoding="utf-8").splitlines():
-        if not in_table:
+        section = _SECTION.match(line.strip())
+        if section:
+            heading, table = (section[1] or "").lower(), None
+            continue
+        if table is None:
             if _TABLE_HEADER.match(line.strip()):
-                in_table = True
+                if active is None:
+                    table = active = []
+                elif completed is None and "completed" in heading:
+                    table = completed = []
             continue
         if not line.strip().startswith("|"):
-            break
-        cells = line.strip().strip("|").split("|")
-        if len(cells) < 2:
+            table = None
             continue
-        link = _LINK.search(cells[1])
-        if link:
-            repo = _plain(link[1])
-            branches.append({
-                "id": repo,
-                "title": _plain(cells[0]),
-                "repo": repo,
-                "url": link[2],
-            })
-    if not in_table:
+        cells = line.strip().strip("|").split("|")
+        row = _row(cells)
+        if row is None:
+            continue
+        if table is completed:
+            row["completed"] = _plain(cells[2]) if len(cells) > 2 else ""
+        table.append(row)
+    if active is None:
         raise ValueError(f"Hub table is missing: {readme}")
-    return branches
+    return active, completed or []
 
 
 def _checklist_heading(heading: str) -> bool:
@@ -296,7 +312,9 @@ def collect(root: str | Path, hub: str = "learning-hub") -> dict:
     if not root.is_dir():
         raise ValueError(f"Root directory is missing or is not a directory: {root}")
     hub_path = root / hub
-    branches = _branches(hub_path / "README.md")
+    branches, completed = _branches(hub_path / "README.md")
+    listed = {branch["repo"] for branch in branches}
+    branches += [row for row in completed if row["repo"] not in listed]
     cache = {}
 
     def repository(repo: str) -> dict:
@@ -337,6 +355,9 @@ def collect(root: str | Path, hub: str = "learning-hub") -> dict:
         if branch["repo"] in icons:
             branch["icon"] = icons[branch["repo"]]
         _mark_icons(branch, _icon_tree(hub_path / "icons" / branch["repo"]))
+        if "completed" in branch:
+            # In the sky only while nothing is open: a new step brings it back as a branch.
+            branch["sky"] = branch["found"] and 0 < branch["total"] == branch["done"]
     def _grown(becomes: str | None) -> bool:
         """True once the branch it becomes is drawn: a found branch, or a part of one."""
         if not becomes:

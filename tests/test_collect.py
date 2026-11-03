@@ -367,3 +367,54 @@ class MilestoneTests(unittest.TestCase):
     def test_milestones_kept_when_they_are_the_only_list(self):
         lines = parse_progress("## Milestone checklist\n- [ ] M1 — Big\n")
         self.assertEqual([s["id"] for line in lines for s in line["steps"]], ["M1"])
+
+
+class CompletedTests(unittest.TestCase):
+    """A branch listed as completed goes to the sky while every step is done."""
+
+    def collect_with(self, rows: str, extra: dict[str, str] = {}):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "root"
+            shutil.copytree(ROOT, root)
+            (root / "done-lab").mkdir()
+            (root / "done-lab" / "PROGRESS.md").write_text(
+                "## Checklist\n- [x] D01 — First\n", encoding="utf-8")
+            for name, text in extra.items():
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(text, encoding="utf-8")
+            readme = root / "learning-hub" / "README.md"
+            readme.write_text(readme.read_text(encoding="utf-8") + (
+                "\n## Completed branches\n\n| Branch | Repository | Completed |\n"
+                "| --- | --- | --- |\n" + rows
+            ), encoding="utf-8")
+            return collect(root)["branches"]
+
+    def test_completed_branch_is_in_the_sky(self):
+        branches = self.collect_with("| Done | [done-lab](https://example.invalid/done-lab) | 2026-11-03 |\n")
+        self.assertEqual([b["title"] for b in branches], ["Paper", "Gears", "Quiet", "Missing", "Done"])
+        done = branches[-1]
+        self.assertEqual((done["completed"], done["sky"]), ("2026-11-03", True))
+        for branch in branches[:-1]:
+            self.assertNotIn("completed", branch)
+            self.assertNotIn("sky", branch)
+
+    def test_an_open_step_brings_it_back(self):
+        branches = self.collect_with(
+            "| Done | [done-lab](https://example.invalid/done-lab) | 2026-11-03 |\n",
+            {"done-lab/02-more/PROGRESS.md": "## Checklist\n- [ ] D02 — Next stage\n"},
+        )
+        self.assertEqual((branches[-1]["completed"], branches[-1]["sky"]), ("2026-11-03", False))
+
+    def test_missing_or_empty_never_in_the_sky(self):
+        branches = self.collect_with(
+            "| Gone | [gone-lab](https://example.invalid/gone-lab) |\n"
+            "| Empty | [empty-lab](https://example.invalid/empty-lab) | |\n",
+            {"empty-lab/PROGRESS.md": "# Nothing yet\n"},
+        )
+        self.assertEqual([(b["completed"], b["sky"]) for b in branches[-2:]], [("", False), ("", False)])
+
+    def test_an_active_row_wins_over_a_completed_one(self):
+        branches = self.collect_with("| Paper again | [paper-lab](https://example.invalid/paper-lab) | 2026-11-03 |\n")
+        self.assertEqual([b["title"] for b in branches], ["Paper", "Gears", "Quiet", "Missing"])
+        self.assertNotIn("completed", branches[0])
