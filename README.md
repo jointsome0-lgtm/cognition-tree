@@ -28,7 +28,8 @@ Open <http://127.0.0.1:4747/>. Every request rebuilds the tree from the files, a
 - The hub's `README.md`: a table whose header starts with `| Branch | Repository |`, one row per branch.
 - Each branch repository's `PROGRESS.md`: the checklist sections, `- [ ]` and `- [x]` items with optional `###` lines.
 - `tree.toml` in the hub, optional: locked branches and their prerequisites.
-- Subfolders with their own `PROGRESS.md`, optional: parts of a branch. A finished part shrinks into one star of its own, shaped from its name, and an open part forks into its own lines. Finished topics inside a part orbit it like moons, so a course of many lectures stays compact.
+- Subfolders with their own `PROGRESS.md`, optional: parts of a branch. A finished part shrinks into one star of its own, shaped from its name, and an open part forks into its own lines. Finished topics inside a part orbit it like moons, so a course of many lectures stays compact. When two or more parts of a branch are finished, their stars form a small system: each on its own orbit around a shared centre of mass, the first part innermost and fastest, joined by a line in their order; an open part already has its orbit, where its future star fills in as its steps are done.
+- An `icons/` folder in the hub, optional: badges that replace the generated star of a finished part, and icons for branches and locked seeds. `python3 -m cognition_tree.badges --root ~/learn` lists the finished parts that have no badge yet.
 
 The exact formats are in [docs/DATA.md](docs/DATA.md).
 

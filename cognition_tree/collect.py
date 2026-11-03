@@ -1,5 +1,6 @@
 """Read local repositories into the tree data contract."""
 
+import base64
 from datetime import datetime
 from pathlib import Path
 import re
@@ -15,6 +16,9 @@ _DASH = re.compile(r"\s*[—–]\s*|\s+-\s+")
 _TITLE = re.compile(r"^#\s+(.+)$", re.M)
 _DIGITS = re.compile(r"(\d+)")
 _PART_DEPTH = 4
+_ICON_TYPES = {".svg": "image/svg+xml", ".png": "image/png", ".webp": "image/webp",
+               ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
+_ICON_MAX_BYTES = 256 * 1024
 _NOT_PARTS = {"node_modules"}
 
 
@@ -244,6 +248,48 @@ def _requirement_status(requirement: dict, repository: dict) -> str:
     return "open" if matches or group else "unknown"
 
 
+def _icons(directory: Path) -> dict[str, str]:
+    """Map each icon's file name, without extension, to a data URI.
+
+    Files that are too large or of another type are skipped, so a stray file
+    never breaks the page.
+    """
+    icons = {}
+    if not directory.is_dir():
+        return icons
+    for path in sorted(directory.iterdir()):
+        kind = _ICON_TYPES.get(path.suffix.lower())
+        if kind is None or not path.is_file() or path.stat().st_size > _ICON_MAX_BYTES:
+            continue
+        encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+        icons.setdefault(path.stem, f"data:{kind};base64,{encoded}")
+    return icons
+
+
+def _icon_tree(directory: Path) -> dict[str, str]:
+    """Icons below a branch's folder, keyed by their path without extension."""
+    icons = {}
+    if not directory.is_dir():
+        return icons
+    for sub in sorted(p for p in directory.rglob("*") if p.is_dir()):
+        prefix = sub.relative_to(directory).as_posix() + "/"
+        icons.update({prefix + k: v for k, v in _icons(sub).items() if prefix + k not in icons})
+    for name, uri in _icons(directory).items():
+        icons.setdefault(name, uri)
+    return icons
+
+
+def _mark_icons(branch: dict, icons: dict[str, str]) -> None:
+    """Give parts, the milestones of a branch, their icon by folder path."""
+    def parts(items):
+        for part in items:
+            if part["path"] in icons:
+                part["icon"] = icons[part["path"]]
+            parts(part.get("parts", []))
+
+    parts(branch["parts"])
+
+
 def collect(root: str | Path, hub: str = "learning-hub") -> dict:
     """Collect branches and evaluate locks against local progress."""
     root = Path(root).expanduser()
@@ -285,8 +331,12 @@ def collect(root: str | Path, hub: str = "learning-hub") -> dict:
             by_repo[entry["repo"]] = branch
         branch["book"] = book
 
+    icons = _icons(hub_path / "icons")
     for branch in branches:
         branch.update(repository(branch["repo"]))
+        if branch["repo"] in icons:
+            branch["icon"] = icons[branch["repo"]]
+        _mark_icons(branch, _icon_tree(hub_path / "icons" / branch["repo"]))
     def _grown(becomes: str | None) -> bool:
         """True once the branch it becomes is drawn: a found branch, or a part of one."""
         if not becomes:
@@ -321,6 +371,8 @@ def collect(root: str | Path, hub: str = "learning-hub") -> dict:
             }
         if "note" in entry:
             branch["note"] = _plain(entry["note"])
+        if entry["id"] in icons:
+            branch["icon"] = icons[entry["id"]]
         if "becomes" in entry:
             branch["becomes"] = entry["becomes"].strip("/")
         met = sum(item["status"] == "met" for item in requirements)

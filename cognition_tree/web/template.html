@@ -115,6 +115,29 @@
   .node:focus-visible circle.body, .node.selected circle.body { stroke: var(--pollen); stroke-width: 3; }
   .tag { font: 600 11px var(--sans); fill: var(--peat); paint-order: stroke; stroke: var(--lichen); stroke-width: 3px; pointer-events: none; }
   .branch-label { font: 400 17px var(--serif); fill: var(--peat); cursor: pointer; }
+  .branch-icon { cursor: pointer; }
+  .spore-icon { pointer-events: none; }
+  /* Closed parts: a constellation whose stars twinkle and whose lines shimmer. */
+  .constellation { fill: none; stroke: var(--pollen); stroke-opacity: 0.85; stroke-width: 1.4;
+    stroke-dasharray: 1 5; stroke-linecap: round; animation: shimmer 6s linear infinite; }
+  .twinkle { transform-box: fill-box; transform-origin: center;
+    animation: star-breath var(--beat, 4s) ease-in-out var(--delay, 0s) infinite; }
+  @keyframes star-breath {
+    0%, 100% { transform: scale(1) rotate(0deg); opacity: 1; }
+    50% { transform: scale(0.9) rotate(6deg); opacity: 0.8; }
+  }
+  @keyframes shimmer { to { stroke-dashoffset: -14; } }
+  .barycentre { fill: var(--pollen); opacity: 0.8; }
+  .constellation.forming { stroke-opacity: 0.35; stroke-dasharray: 1 7; }
+  .part-star.forming .rays { fill-opacity: calc(0.08 + 0.7 * var(--progress, 0));
+    stroke-dasharray: 2 2; stroke-opacity: 0.9; }
+  .part-star.forming .spikes { display: none; }
+  .part-star.forming .heart { opacity: calc(0.2 + 0.8 * var(--progress, 0)); }
+  [data-theme="night"] .part-star.forming .rays { filter: none; stroke: var(--tint); stroke-width: 0.8; }
+  [data-theme="night"] .barycentre { fill: #fff4c8; filter: drop-shadow(0 0 3px #fff4c8); }
+  @media (prefers-reduced-motion: reduce) { .constellation, .twinkle { animation: none; } }
+  .step-icon.waiting { opacity: 0.35; filter: grayscale(1); }
+  aside h2 img.icon { width: 1.1em; height: 1.1em; vertical-align: -0.15em; }
   .branch-count { font: 12px var(--sans); fill: var(--peat-soft); pointer-events: none; }
   .root { fill: none; stroke-width: 1.2; }
   .root.open { stroke: var(--fog); stroke-dasharray: 4 5; }
@@ -195,6 +218,8 @@
   [data-theme="night"] .part-label { fill: #b9b2ea; }
   [data-theme="night"] .part-star .rays { fill: var(--tint); stroke: none; filter: drop-shadow(0 0 5px var(--tint)); }
   [data-theme="night"] .part-star .rays.second { fill: #ffffff; opacity: 0.55; filter: none; }
+  [data-theme="night"] .part-star .step-icon { filter: drop-shadow(0 0 4px var(--tint, rgba(255, 255, 255, 0.6))); }
+  [data-theme="night"] .constellation { stroke: #fff4c8; stroke-opacity: 0.9; filter: drop-shadow(0 0 2px #fff4c8); }
   [data-theme="night"] .part-star .spikes { stroke: var(--tint); stroke-width: 0.6; opacity: 0.8; }
   [data-theme="night"] .part-star .heart { fill: #ffffff; }
   [data-theme="night"] .part-star.selected .rays, [data-theme="night"] .part-star:focus-visible .rays { stroke: var(--pollen); stroke-width: 1.5; }
@@ -285,6 +310,8 @@
     if (parent) parent.appendChild(node);
     return node;
   }
+  const ICON_SIZE = 22;
+  const iconTag = src => src ? `<img class="icon" src="${esc(src)}" alt=""> ` : "";
   function polar(r, a) { return [r * Math.cos(a), r * Math.sin(a)]; }
   function smoothPath(points) {
     let d = `M${points[0][0].toFixed(1)},${points[0][1].toFixed(1)}`;
@@ -470,6 +497,18 @@
     const count = el("text", { x: lx, y: ly + dy + 16, "text-anchor": anchor, class: "branch-count" }, group);
     count.textContent = branch.found ? `${branch.done} of ${branch.total}` : "not found";
     labels.push(label, count);
+    if (branch.icon) {
+      // Beside the name; for a name centred above or below the tree, further out.
+      const size = ICON_SIZE, gap = 6;
+      let ix, iy = ly + dy - size + 4;
+      if (anchor === "start") ix = lx;
+      else if (anchor === "end") ix = lx - size;
+      else { ix = lx - size / 2; iy = Math.sin(angle) < 0 ? ly + dy - 17 - size - gap : ly + dy + 22; }
+      if (anchor !== "middle") for (const t of [label, count]) t.setAttribute("x", lx + (anchor === "start" ? 1 : -1) * (size + gap));
+      const icon = el("image", { href: branch.icon, x: ix, y: iy, width: size, height: size, class: "branch-icon" }, group);
+      labels.push(icon);
+      bindSelect(icon, () => showBranch(branch));
+    }
     bindSelect(label, () => showBranch(branch));
   }
 
@@ -502,9 +541,13 @@
       drawHub(group, sub.hub, branch, sub.part, book, animate, reach);
       drawPartNode(group, sub.hub, branch, sub.part, reach);
     }
-    for (const star of hub.stars) {
+    if (hub.stars.length > 1) {
+      drawConstellation(group, hub, branch, part, book, reach);
+    } else for (const star of hub.stars) {
       el("path", { d: smoothPath([[hub.x, hub.y], [star.x, star.y]]), class: "stem" + book }, group);
       drawPartStar(group, star.x, star.y, star.part, branch, 0.7);
+      // The branch label goes past the stars and badges, never over them.
+      reach.r = Math.max(reach.r, Math.hypot(star.x, star.y) + 14);
     }
     if (hub.centred) drawPartStar(group, hub.x, hub.y, hub.centred, branch, 1);
     for (const ring of hub.rings) for (const moon of ring.moons) drawPartStar(group, moon.x, moon.y, moon.part, branch, 0.5);
@@ -525,8 +568,13 @@
     bindSelect(g, () => showPart(branch, part, g));
     // The sun is the star this part will be once closed, so it keeps its look. Its moons
     // fill the space a label would need, so it is named by its tooltip and panel only.
-    if (hub.sun) { drawGlyph(g, `${branch.repo}/${part.path}`, hub.sun); return; }
-    el("path", { d: DIAMOND, class: "diamond" }, g);
+    if (hub.sun) {
+      if (part.icon) drawIcon(g, part.icon, hub.sun * 2.4, "waiting");
+      else drawGlyph(g, `${branch.repo}/${part.path}`, hub.sun);
+      return;
+    }
+    if (part.icon) drawIcon(g, part.icon, 18, "waiting");
+    else el("path", { d: DIAMOND, class: "diamond" }, g);
     // The label goes past the tip of the part's own lines, where fans have room;
     // a part with no lines of its own is labelled beside its node.
     const tip = hub.lines.filter(l => l.steps.length).map(l => l.steps[l.steps.length - 1])
@@ -555,6 +603,90 @@
     return [...part.lines.flatMap(l => walk(l.steps)), ...(part.parts || []).flatMap(partSteps)];
   }
 
+  // Two or more closed parts form a constellation: their stars stand around a centre of
+  // mass past the hub, in their order with a little scatter, joined by a line, and the
+  // whole figure turns slowly around that centre while each star stays upright.
+  // Two or more closed parts form a small system: each star has an orbit of its own around
+  // a shared centre of mass past the hub, the first part innermost, and inner stars go
+  // faster, as planets do. A line joins neighbouring parts and stretches as they move.
+  // An open part beside them already has its orbit, where its future star is forming.
+  function drawConstellation(group, hub, branch, part, book, reach) {
+    const members = [
+      ...hub.stars.map(st => ({ part: st.part, open: false })),
+      ...hub.parts.map(sub => ({ part: sub.part, open: true })),
+    ].sort((a, b) => a.part.path.localeCompare(b.part.path, undefined, { numeric: true }));
+    const n = members.length;
+    const rand = seeded(hashText(`constellation:${branch.repo}/${part ? part.path : ""}`));
+    const gap = 8, inner = 16, outerOrbit = inner + gap * (n - 1);
+    const [ox, oy] = polar(outerOrbit + 22, hub.angle);
+    const cx = hub.x + ox, cy = hub.y + oy;
+    const dir = rand() < 0.5 ? -1 : 1;
+    el("path", { d: smoothPath([[hub.x, hub.y], [cx, cy]]), class: "stem" + book }, group);
+    for (const [k, m] of members.entries()) {
+      m.r = inner + gap * k;
+      m.phase = rand() * 2 * Math.PI;
+      // Kepler: the period grows as r^1.5; the innermost goes round in about 40 seconds.
+      m.omega = dir * (2 * Math.PI / 40) * Math.pow(inner / m.r, 1.5);
+      drawOrbit(group, cx, cy, m.r);
+      m.x = cx + m.r * Math.cos(m.phase); m.y = cy + m.r * Math.sin(m.phase);
+    }
+    const links = [];
+    for (let k = 1; k < n; k++) {
+      const forming = members[k - 1].open || members[k].open;
+      links.push(el("path", { class: "constellation" + (forming ? " forming" : "") }, group));
+    }
+    el("circle", { cx: cx.toFixed(1), cy: cy.toFixed(1), r: 2.4, class: "barycentre" }, group);
+    for (const m of members) {
+      m.node = m.open ? drawFormingStar(group, m.x, m.y, m.part, branch)
+                      : drawPartStar(group, m.x, m.y, m.part, branch, 0.7);
+    }
+    const system = { cx, cy, members, links };
+    placeOrbiters(system, 0);
+    if (MOVING) orbiters.push(system);
+    // The branch label goes past the whole system, never over it.
+    reach.r = Math.max(reach.r, Math.hypot(cx, cy) + outerOrbit + 16);
+  }
+
+  // Positions of every star of a system at time t, in seconds, and the lines between them.
+  function placeOrbiters(system, t) {
+    for (const m of system.members) {
+      const a = m.phase + m.omega * t;
+      m.x = system.cx + m.r * Math.cos(a); m.y = system.cy + m.r * Math.sin(a);
+      m.node.setAttribute("transform", `translate(${m.x.toFixed(2)},${m.y.toFixed(2)})`);
+    }
+    system.links.forEach((link, i) => {
+      const [a, b] = [system.members[i], system.members[i + 1]];
+      link.setAttribute("d", `M${a.x.toFixed(2)},${a.y.toFixed(2)} L${b.x.toFixed(2)},${b.y.toFixed(2)}`);
+    });
+  }
+
+  const orbiters = [];
+  const orbitClock = performance.now();
+  function moveOrbiters(now) {
+    const t = (now - orbitClock) / 1000;
+    for (const system of orbiters) placeOrbiters(system, t);
+    requestAnimationFrame(moveOrbiters);
+  }
+  requestAnimationFrame(moveOrbiters);
+
+  // The star an open part will become, the same shape it takes when closed, drawn as an
+  // outline that fills in as its steps are done.
+  function drawFormingStar(group, x, y, part, branch) {
+    const outer = 0.7 * (6 + 1.3 * Math.log2(1 + part.total));
+    const g = el("g", {
+      class: "part-star forming", transform: `translate(${x.toFixed(1)},${y.toFixed(1)})`,
+      tabindex: 0, role: "button", "aria-label": `${part.title}: forming, ${part.done} of ${part.total} steps done`,
+    }, group);
+    g.style.setProperty("--progress", part.total ? (part.done / part.total).toFixed(2) : "0");
+    if (part.icon) drawIcon(g, part.icon, Math.max(18, outer * 3), "waiting");
+    else drawGlyph(g, `${branch.repo}/${part.path}`, outer);
+    el("title", {}, g).textContent = `${part.title}, forming: ${part.done} of ${part.total}`;
+    bindSelect(g, () => showPart(branch, part, g));
+    return g;
+  }
+
+  const MOVING = !matchMedia("(prefers-reduced-motion: reduce)").matches;
+
   // Each closed part becomes one star of its own, shaped and tinted from its path,
   // so the same part always draws the same star. A closed part with parts of its own
   // keeps them as moons.
@@ -567,7 +699,12 @@
       class: "part-star", transform: `translate(${x.toFixed(1)},${y.toFixed(1)})`,
       tabindex: 0, role: "button", "aria-label": `${part.title}: closed, ${plural(part.total, "step", "steps")} done`,
     }, group);
-    drawGlyph(g, `${branch.repo}/${part.path}`, outer);
+    const beat = seeded(hashText(`twinkle:${branch.repo}/${part.path}`));
+    const body = el("g", { class: "twinkle" }, g);
+    body.style.setProperty("--beat", `${(3 + 3 * beat()).toFixed(2)}s`);
+    body.style.setProperty("--delay", `${(-6 * beat()).toFixed(2)}s`);
+    if (part.icon) drawIcon(body, part.icon, Math.max(26 * scale, outer * 3));
+    else drawGlyph(body, `${branch.repo}/${part.path}`, outer);
     el("title", {}, g).textContent = `${part.title}, closed`;
     hubAt.set(`${branch.repo}/${part.path}`, { x, y });
     // Locked branches that wait for these steps are placed by the star.
@@ -584,6 +721,12 @@
         drawPartStar(group, x + ring.r * Math.cos(a), y + ring.r * Math.sin(a), moons[next++], branch, 0.5);
       }
     });
+    return g;
+  }
+
+  // A custom icon centred on the group; "waiting" fades it until its part is closed.
+  function drawIcon(g, src, size, state = "") {
+    el("image", { href: src, x: -size / 2, y: -size / 2, width: size, height: size, class: `step-icon ${state}`.trim() }, g);
   }
 
   const STAR_TINTS = ["#9fe6ff", "#ffd9a0", "#ffb8cc", "#cbbcff", "#a8f5d4", "#fff1c4"];
@@ -744,7 +887,7 @@
     mark(null);
     const lines = lineList(branch);
     panel.innerHTML = `
-      <h2>${esc(branch.book && branch.book.emblem ? `${branch.book.emblem} ${branch.title}` : branch.title)}</h2>
+      <h2>${iconTag(branch.icon)}${esc(branch.book && branch.book.emblem ? `${branch.book.emblem} ${branch.title}` : branch.title)}</h2>
       ${branch.book ? `<p class="where">Book: ${esc(branch.book.title)}</p>` : ""}
       <p class="where">${branch.found ? `${branch.done} of ${branch.total} steps done` : "The repository or its progress file was not found."}</p>
       ${openedFrom(branch.repo)}
@@ -756,7 +899,7 @@
     mark(node);
     const lines = lineList(part);
     panel.innerHTML = `
-      <h2>${esc(part.title)}</h2>
+      <h2>${iconTag(part.icon)}${esc(part.title)}</h2>
       <p class="where">${esc(branch.title)}, ${esc(part.path)}</p>
       <span class="status current">${part.done} of ${part.total} steps done</span>
       ${openedFrom(`${branch.repo}/${part.path}`)}
@@ -766,7 +909,7 @@
   function showClosed(branch, part, node) {
     mark(node);
     panel.innerHTML = `
-      <h2>${esc(part.title)}</h2>
+      <h2>${iconTag(part.icon)}${esc(part.title)}</h2>
       <p class="where">${esc(branch.title)}, ${esc(part.path)}</p>
       <span class="status done">Closed, all ${plural(part.total, "step", "steps")} done</span>
       ${openedFrom(`${branch.repo}/${part.path}`)}
@@ -783,7 +926,7 @@
         ${named ? `<br><span class="hint">${esc(repoTitle(r.repo))}, ${esc(r.step)}</span>` : ""}</li>`).join("");
     const src = lock.source && safeUrl(lock.source.url);
     panel.innerHTML = `
-      <h2>${named ? esc(lock.title) : "Something is waiting here"}</h2>
+      <h2>${named ? iconTag(lock.icon) + esc(lock.title) : "Something is waiting here"}</h2>
       <p class="where">${lock.open ? "Open. Every prerequisite is met." : `${lock.met} of ${lock.total} prerequisites met`}</p>
       <span class="status ${lock.open ? "current" : "locked"}">${lock.open ? "Open" : "Locked"}</span>
       ${reqs ? `<ul>${reqs}</ul>` : ""}
@@ -821,6 +964,7 @@
         "aria-label": `${named ? lock.title : "Hidden branch"}, ${lock.open ? "open" : `${lock.met} of ${lock.total} prerequisites met`}`,
       }, group);
       const shell = el("circle", { r: lock.open ? 13 : 11, class: "shell" }, g);
+      if (named && lock.icon) el("image", { href: lock.icon, x: -8, y: -8, width: 16, height: 16, class: "spore-icon" }, g);
       const words = [el("text", { y: 0 }, g), el("text", { y: 17, class: "spore-count" }, g)];
       words[0].textContent = named ? lock.title : "???";
       words[1].textContent = lock.open ? "open" : `${lock.met} of ${lock.total}`;
@@ -866,7 +1010,7 @@
 
   function render(mode, animate) {
     svg.textContent = "";
-    stepIndex.clear(); groupLast.clear(); branchTip.clear(); labels.length = 0;
+    stepIndex.clear(); groupLast.clear(); branchTip.clear(); labels.length = 0; orbiters.length = 0;
     drawGradients();
     const world = el("g", { id: "world" }, svg);
     el("circle", { r: R_CORE * 2.6, class: "halo" }, world);

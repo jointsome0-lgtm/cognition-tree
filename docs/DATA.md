@@ -141,6 +141,14 @@ emblem = "🪢"         # optional
 
 A book whose repository is a branch in the hub table marks that branch; any other book is added after the hub branches, with `url` from the entry or null. Either way the branch gets `"book": {"title": ..., "emblem": ...}`, with `emblem` an empty string when not given. Branches that are not books have no `book` key. A `##` heading containing `чек-лист` also counts as a checklist section.
 
+## Icons
+
+An `icons/` folder in the hub, optional, holds custom icons. A file named after a branch's repository, such as `icons/learn-math.svg`, becomes that branch's icon; a file named after a locked branch's `id`, such as `icons/models.svg`, becomes the icon of its seed. SVG, PNG, WebP and JPEG files up to 256 KiB are read; other files are skipped. When two files share a name, the first in alphabetical order wins, so `x.png` beats `x.svg`.
+
+A folder named after a branch's repository holds badges for its milestones, the parts. A file named after a part's folder path, such as `icons/learn-vim/01-basics.svg`, or `icons/repo/stage/sub.svg` for a nested part, takes the place of that part's star once it is closed; while the part is open, the badge is drawn faded in place of its diamond. Steps have no icons. `python3 -m cognition_tree.badges --root ~/learn` lists the closed parts that have no badge yet.
+
+The file is embedded in the data as a `data:` URI under `"icon"`, so the page stays self-contained. A branch or lock without an icon has no `icon` key. An icon sits beside the book emblem, never in its place. Because the folder lives in the hub, the icons travel through Git with the rest of the hub.
+
 ## Locks
 
 `tree.toml` in the hub:
