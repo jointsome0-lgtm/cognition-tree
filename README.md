@@ -15,6 +15,14 @@ xdg-open out/index.html
 
 `--root` is the directory that holds the repositories side by side. The page is self-contained and works offline.
 
+### Live map
+
+```sh
+python3 -m cognition_tree.serve --root ~/learn --port 4747
+```
+
+Open <http://127.0.0.1:4747/>. Every request rebuilds the tree from the files, and an open tab checks for changes every three seconds and reloads itself when the data changes. If a file is caught mid-save, the last good build stays on screen. The server listens on localhost only.
+
 ## What it reads
 
 - The hub's `README.md`: a table whose header starts with `| Branch | Repository |`, one row per branch.
