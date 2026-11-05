@@ -137,6 +137,7 @@
   [data-theme="night"] .barycentre { fill: #fff4c8; filter: drop-shadow(0 0 3px #fff4c8); }
   @media (prefers-reduced-motion: reduce) { .constellation, .twinkle { animation: none; } }
   .step-icon.waiting { opacity: 0.35; filter: grayscale(1); }
+  .part-star.forming .step-icon.waiting { opacity: calc(0.25 + 0.75 * var(--progress, 0)); }
   aside h2 img.icon { width: 1.1em; height: 1.1em; vertical-align: -0.15em; }
   .branch-count { font: 12px var(--sans); fill: var(--peat-soft); pointer-events: none; }
   .root { fill: none; stroke-width: 1.2; }
@@ -182,6 +183,11 @@
   .sky-label { font: 400 12px var(--serif); letter-spacing: 0.42em; fill: var(--peat-soft); cursor: pointer; }
   .sky-date { font: 10px var(--sans); letter-spacing: 0.12em; fill: var(--fog); pointer-events: none; }
   .core-text { font: 400 13px var(--serif); fill: var(--lichen); pointer-events: none; }
+  .core-text.small { font-size: 9px; letter-spacing: 0.08em; }
+  .core-text.big { font-size: 22px; }
+  .level-track, .level-fill { fill: none; stroke-width: 3; pointer-events: none; }
+  .level-track { stroke: var(--lichen); stroke-opacity: 0.22; }
+  .level-fill { stroke: var(--pollen); stroke-linecap: round; }
 
   [data-theme="night"] body {
     background:
@@ -214,17 +220,17 @@
   [data-theme="night"] .stem:not(.book):not(.missing) { stroke: url(#stem-fade); stroke-width: 1.1; }
   [data-theme="night"] .stem.book { stroke-width: 1.1; opacity: 0.75; }
   [data-theme="night"] .trunk { stroke-width: 2.2; }
-  [data-theme="night"] .node circle.body { fill: #8f9ad8; fill-opacity: 0.55; stroke: none; r: 2.6; }
-  [data-theme="night"] .node.child circle.body { r: 1.8; }
+  [data-theme="night"] .node circle.body { fill: #8f9ad8; fill-opacity: 0.55; stroke: none; r: calc(2.6px * var(--mob, 1)); }
+  [data-theme="night"] .node.child circle.body { r: calc(1.8px * var(--mob, 1)); }
   [data-theme="night"] .node.done circle.body {
-    fill: #f4fbff; fill-opacity: 1; r: 3.2;
+    fill: #f4fbff; fill-opacity: 1; r: calc(3.2px * var(--mob, 1));
     filter: drop-shadow(0 0 2px #fff) drop-shadow(0 0 6px var(--leaf));
   }
   [data-theme="night"] .node.archived circle.body { fill: #ffe2bd; fill-opacity: 1; filter: drop-shadow(0 0 5px var(--heartwood)); }
   [data-theme="night"] .spark { fill: #eaf8ff; opacity: 0.8; pointer-events: none; }
   [data-theme="night"] .node.archived .spark { fill: #ffe2bd; }
-  [data-theme="night"] .node.current circle.body { fill: #fff3cf; fill-opacity: 1; r: 3.4; filter: drop-shadow(0 0 4px var(--pollen)); }
-  [data-theme="night"] .node.current circle.ring { stroke-width: 1.2; r: 8; filter: drop-shadow(0 0 3px var(--pollen)); }
+  [data-theme="night"] .node.current circle.body { fill: #fff3cf; fill-opacity: 1; r: calc(3.4px * var(--mob, 1)); filter: drop-shadow(0 0 4px var(--pollen)); }
+  [data-theme="night"] .node.current circle.ring { stroke-width: 1.2; r: calc(8px + 3.4px * (var(--mob, 1) - 1)); filter: drop-shadow(0 0 3px var(--pollen)); }
   [data-theme="night"] .node:focus-visible circle.body, [data-theme="night"] .node.selected circle.body { stroke: var(--pollen); stroke-width: 2; }
   [data-theme="night"] .node:hover circle.body { fill-opacity: 1; }
   [data-theme="night"] .tag { fill: #ffe3a3; font-weight: 500; letter-spacing: 0.04em; }
@@ -244,6 +250,8 @@
   [data-theme="night"] .part-star.selected .rays, [data-theme="night"] .part-star:focus-visible .rays { stroke: var(--pollen); stroke-width: 1.5; }
   [data-theme="night"] .core { fill: #fff3d6; filter: drop-shadow(0 0 6px #fff) drop-shadow(0 0 18px rgba(255, 209, 102, 0.6)); }
   [data-theme="night"] .core-text { fill: #3a2c4a; }
+  [data-theme="night"] .level-track { stroke: #3a2c4a; stroke-opacity: 0.15; }
+  [data-theme="night"] .level-fill { stroke: #c4862a; }
   [data-theme="night"] .year-ring { stroke: #ffe2bd; opacity: 0.45; filter: drop-shadow(0 0 3px #d9a46c); }
   [data-theme="night"] .sky-line { stroke: #c9d2ff; stroke-opacity: 0.28; }
   [data-theme="night"] .sky-core { fill: #ffffff; stroke: none; filter: drop-shadow(0 0 2px #fff) drop-shadow(0 0 5px var(--tint)); }
@@ -321,6 +329,19 @@
 (() => {
   "use strict";
   const data = JSON.parse(document.getElementById("tree-data").textContent);
+  // Data from a server that predates XP has no XP keys: count 10 per step, as the
+  // backend does for an untagged step, so a stale server never breaks the page.
+  function fillXp(holder) {
+    const own = [];
+    const walk = steps => { for (const s of steps) { s.xp ??= 10; own.push(s); walk(s.children || []); } };
+    for (const line of holder.lines || []) walk(line.steps);
+    const parts = (holder.parts || []).map(fillXp);
+    const sum = (list, f) => list.reduce((n, x) => n + f(x), 0);
+    holder.xp_done ??= sum(own.filter(s => s.done), s => s.xp) + sum(parts, p => p.xp_done);
+    holder.xp_total ??= sum(own, s => s.xp) + sum(parts, p => p.xp_total);
+    return holder;
+  }
+  data.branches.forEach(fillXp);
   const svg = document.getElementById("tree");
   const panel = document.getElementById("panel");
   const NS = "http://www.w3.org/2000/svg";
@@ -356,6 +377,16 @@
     if (points.length > 1) d += ` L${last[0].toFixed(1)},${last[1].toFixed(1)}`;
     return d;
   }
+  // A node grows by a quarter for every threefold XP: 10 is the base size, 30 a quarter
+  // larger, 100 half again, 300 three quarters. Kept within bounds for very small or large tags.
+  function mobScale(xp) {
+    return Math.min(2, Math.max(0.75, 1 + 0.25 * Math.log(Math.max(xp, 1) / 10) / Math.log(3)));
+  }
+  // Level L takes 50·L² XP in all, so each level costs 100 XP more than the one before.
+  // A level never drops: new steps on the map add XP to earn, never take any away.
+  function levelOf(xp) { return Math.floor(Math.sqrt(xp / 50)); }
+  function levelXp(level) { return 50 * level * level; }
+  function xpText(holder) { return `${holder.xp_done} of ${holder.xp_total} XP`; }
   function plural(n, one, many) { return `${n} ${n === 1 ? one : many}`; }
   function readStore(key, fallback) {
     try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; }
@@ -434,7 +465,7 @@
     const fitGap = (holder, r, depth) => {
       const clear = clearance(holder, depth);
       const start = r + Math.max(24, clear);
-      for (const l of holder.lines) if (l.steps.length) gap = Math.min(gap, (R_MAX - start) / l.steps.length);
+      for (const l of holder.lines) if (l.steps.length) gap = Math.min(gap, (R_MAX - start) / lineSpan(l.steps));
       for (const p of openParts(holder)) fitGap(p, r + hopTo(holder, p, depth), depth + 1);
     };
     for (const b of branches) fitGap(b, R_TRUNK, 0);
@@ -496,19 +527,39 @@
     return hub;
   }
 
+  // Where each step of a line stands, in gaps from the first: neighbours are apart by
+  // the mean of their sizes, so two big mobs stand as clear of each other as two small ones.
+  function stepSpans(steps) {
+    const at = [];
+    steps.forEach((step, k) => at.push(k ? at[k - 1] + (mobScale(steps[k - 1].xp) + mobScale(step.xp)) / 2 : 0));
+    return at;
+  }
+  // The length of a line in gaps, one more than its span, as a line of n small steps takes n.
+  function lineSpan(steps) { return steps.length ? stepSpans(steps).at(-1) + 1 : 0; }
+
+  // Children stand just past their parent, alternating sides, as far out as both sizes need;
+  // their own children stand past them the same way.
+  function placeChildren(step, x, y, r, a) {
+    const mp = mobScale(step.xp);
+    return (step.children || []).map((child, c) => {
+      const mc = mobScale(child.xp);
+      const side = c % 2 === 0 ? 1 : -1;
+      const ca = a + side * (0.035 + 0.02 * Math.floor(c / 2));
+      const cr = r + 1.09 * (5.6 * mp + 3.6 * mc) + 6 * mc * Math.floor(c / 2);
+      const [cx, cy] = polar(cr, ca);
+      return { step: child, x: cx, y: cy, parent: [x, y], children: placeChildren(child, cx, cy, cr, ca) };
+    });
+  }
+
   function placeSteps(line, start, base, curl, gap) {
+    const spans = stepSpans(line.steps);
+    const last = spans.at(-1) || 1;
     return line.steps.map((step, k) => {
-      const t = line.steps.length > 1 ? k / (line.steps.length - 1) : 0;
+      const t = line.steps.length > 1 ? spans[k] / last : 0;
       const a = base + curl * Math.sin(t * Math.PI);
-      const r = start + k * gap;
+      const r = start + spans[k] * gap;
       const [x, y] = polar(r, a);
-      const children = (step.children || []).map((child, c) => {
-        const side = c % 2 === 0 ? 1 : -1;
-        const ca = a + side * (0.035 + 0.02 * Math.floor(c / 2));
-        const [cx, cy] = polar(r + 10 + 6 * Math.floor(c / 2), ca);
-        return { step: child, x: cx, y: cy, parent: [x, y] };
-      });
-      return { step, x, y, angle: a, children };
+      return { step, x, y, angle: a, children: placeChildren(step, x, y, r, a) };
     });
   }
 
@@ -528,7 +579,7 @@
     const label = el("text", { x: lx, y: ly + dy, "text-anchor": anchor, class: "branch-label" + book, tabindex: 0, role: "button" }, group);
     label.textContent = branch.book && branch.book.emblem ? `${branch.book.emblem} ${branch.title}` : branch.title;
     const count = el("text", { x: lx, y: ly + dy + 16, "text-anchor": anchor, class: "branch-count" }, group);
-    count.textContent = branch.found ? `${branch.done} of ${branch.total}` : "not found";
+    count.textContent = branch.found ? `${branch.done} of ${branch.total} · ${xpText(branch)}` : "not found";
     labels.push(label, count);
     const block = { items: [label, count], angle };
     labelBlocks.push(block);
@@ -558,14 +609,17 @@
       if (!steps.length) continue;
       const pts = [[hub.x, hub.y], ...steps.map(s => [s.x, s.y])];
       grow(el("path", { d: smoothPath(pts), class: "stem" + book }, group), animate, 0.25);
-      for (const s of steps) for (const c of s.children) {
+      const twigs = s => s.children.forEach(c => {
         el("path", { d: `M${s.x.toFixed(1)},${s.y.toFixed(1)} L${c.x.toFixed(1)},${c.y.toFixed(1)}`, class: "stem", "stroke-width": 1 }, group);
-      }
+        twigs(c);
+      });
+      const kids = s => s.children.forEach(c => { drawNode(group, c, branch, line, true, part); kids(c); });
+      steps.forEach(twigs);
       for (const s of steps) {
         s.tagged = s.step.current && !reach.tagged;
         if (s.tagged) reach.tagged = true;
         drawNode(group, s, branch, line, false, part);
-        for (const c of s.children) drawNode(group, c, branch, line, true, part);
+        kids(s);
         if (s.step.group) groupLast.set(`${branch.repo}|${s.step.group}`, { x: s.x, y: s.y });
       }
       const last = steps[steps.length - 1];
@@ -600,7 +654,7 @@
       transform: `translate(${hub.x.toFixed(1)},${hub.y.toFixed(1)})`,
       tabindex: 0, role: "button", "aria-label": `${part.title}, ${part.done} of ${part.total} steps done`,
     }, group);
-    el("title", {}, g).textContent = `${part.title}, ${part.done} of ${part.total}`;
+    el("title", {}, g).textContent = `${part.title}, ${part.done} of ${part.total}, ${xpText(part)}`;
     bindSelect(g, () => showPart(branch, part, g));
     // The sun is the star this part will be once closed, so it keeps its look. Its moons
     // fill the space a label would need, so it is named by its tooltip and panel only.
@@ -708,15 +762,15 @@
   // The star an open part will become, the same shape it takes when closed, drawn as an
   // outline that fills in as its steps are done.
   function drawFormingStar(group, x, y, part, branch) {
-    const outer = 0.7 * (6 + 1.3 * Math.log2(1 + part.total));
+    const outer = 0.7 * (6 + 1.3 * Math.log2(1 + part.xp_total / 10));
     const g = el("g", {
       class: "part-star forming", transform: `translate(${x.toFixed(1)},${y.toFixed(1)})`,
       tabindex: 0, role: "button", "aria-label": `${part.title}: forming, ${part.done} of ${part.total} steps done`,
     }, group);
-    g.style.setProperty("--progress", part.total ? (part.done / part.total).toFixed(2) : "0");
+    g.style.setProperty("--progress", part.xp_total ? (part.xp_done / part.xp_total).toFixed(2) : "0");
     if (part.icon) drawIcon(g, part.icon, Math.max(18, outer * 3), "waiting");
     else drawGlyph(g, `${branch.repo}/${part.path}`, outer);
-    el("title", {}, g).textContent = `${part.title}, forming: ${part.done} of ${part.total}`;
+    el("title", {}, g).textContent = `${part.title}, forming: ${part.done} of ${part.total}, ${xpText(part)}`;
     bindSelect(g, () => showPart(branch, part, g));
     return g;
   }
@@ -727,7 +781,7 @@
   // so the same part always draws the same star. A closed part with parts of its own
   // keeps them as moons.
   function drawPartStar(group, x, y, part, branch, scale) {
-    const outer = scale * (6 + 1.3 * Math.log2(1 + part.total));
+    const outer = scale * (6 + 1.3 * Math.log2(1 + part.xp_total / 10));
     const moons = part.parts || [];
     const rings = orbits(moons.length, outer);
     for (const ring of rings) drawOrbit(group, x, y, ring.r);
@@ -830,11 +884,14 @@
       class: `node ${status}${isChild ? " child" : ""}`,
       transform: `translate(${x.toFixed(1)},${y.toFixed(1)})`,
       tabindex: 0, role: "button",
-      "aria-label": `${step.id} ${step.title}, ${STATUS_WORDS[status]}`,
+      "aria-label": `${step.id} ${step.title}, ${STATUS_WORDS[status]}, ${step.xp} XP`,
     }, group);
-    if (status === "current") el("circle", { r: 9.5, class: "ring" }, g);
-    if (step.done) el("path", { d: SPARK, class: "spark", transform: `scale(${isChild ? 0.6 : 1})` }, g);
-    el("circle", { r: isChild ? 3.6 : 5.6, class: "body" }, g);
+    const mob = mobScale(step.xp);
+    g.style.setProperty("--mob", mob.toFixed(2));
+    // The ring keeps the same gap around a bigger body, so it never reaches a neighbour's.
+    if (status === "current") el("circle", { r: (9.5 + 5.6 * (mob - 1)).toFixed(1), class: "ring" }, g);
+    if (step.done) el("path", { d: SPARK, class: "spark", transform: `scale(${((isChild ? 0.6 : 1) * mob).toFixed(2)})` }, g);
+    el("circle", { r: ((isChild ? 3.6 : 5.6) * mob).toFixed(1), class: "body" }, g);
     if (placed.tagged && !/:/.test(step.id)) {
       // Beside the stem, not along it, so the next nodes never cover the tag.
       const [nx, ny] = besideStem(placed.angle);
@@ -893,6 +950,7 @@
       <h2>${id}${esc(step.title)}</h2>
       <p class="where">${esc(where)}${step.group ? `, block ${esc(step.group)}` : ""}</p>
       <span class="status ${status}">${STATUS_WORDS[status]}</span>
+      <p class="hint">${step.xp} XP${step.done ? ", earned" : ""}</p>
       ${branch.url && safeUrl(branch.url) ? `<p><a href="${esc(branch.url)}" target="_blank" rel="noopener">Open ${esc(branch.repo)}</a></p>` : ""}`;
   }
 
@@ -902,11 +960,14 @@
   }
   function lineList(holder) {
     return allLines(holder).map(({ line: l, part }) => {
-      const all = l.steps.flatMap(s => [s, ...(s.children || [])]);
+      const walk = steps => steps.flatMap(s => [s, ...walk(s.children || [])]);
+      const all = walk(l.steps);
       const done = all.filter(s => s.done).length;
+      const xp = all.filter(s => s.done).reduce((sum, s) => sum + s.xp, 0);
+      const xpAll = all.reduce((sum, s) => sum + s.xp, 0);
       const cur = l.steps.find(s => s.current);
       const title = [part && part.title, l.title || "Steps"].filter(Boolean).join(" · ");
-      return `<li>${esc(title)}<span class="req-status">${done} of ${all.length}</span>
+      return `<li>${esc(title)}<span class="req-status">${done} of ${all.length} · ${xp} of ${xpAll} XP</span>
         ${cur ? `<br><span class="hint">Now: ${esc(cur.id.includes(":") ? cur.title : cur.id + " " + cur.title)}</span>` : ""}</li>`;
     }).join("");
   }
@@ -933,7 +994,7 @@
     panel.innerHTML = `
       <h2>${iconTag(branch.icon)}${esc(branch.book && branch.book.emblem ? `${branch.book.emblem} ${branch.title}` : branch.title)}</h2>
       ${branch.book ? `<p class="where">Book: ${esc(branch.book.title)}</p>` : ""}
-      <p class="where">${branch.found ? `${branch.done} of ${branch.total} steps done` : "The repository or its progress file was not found."}</p>
+      <p class="where">${branch.found ? `${branch.done} of ${branch.total} steps done, ${xpText(branch)}` : "The repository or its progress file was not found."}</p>
       ${completedNote(branch)}
       ${openedFrom(branch.repo)}
       ${lines ? `<ul>${lines}</ul>` : ""}
@@ -947,6 +1008,7 @@
       <h2>${iconTag(part.icon)}${esc(part.title)}</h2>
       <p class="where">${esc(branch.title)}, ${esc(part.path)}</p>
       <span class="status current">${part.done} of ${part.total} steps done</span>
+      <p class="hint">${xpText(part)}</p>
       ${openedFrom(`${branch.repo}/${part.path}`)}
       ${lines ? `<ul>${lines}</ul>` : `<p class="hint">No checklist here yet.</p>`}`;
   }
@@ -956,7 +1018,7 @@
     panel.innerHTML = `
       <h2>${iconTag(part.icon)}${esc(part.title)}</h2>
       <p class="where">${esc(branch.title)}, ${esc(part.path)}</p>
-      <span class="status done">Closed, all ${plural(part.total, "step", "steps")} done</span>
+      <span class="status done">Closed, all ${plural(part.total, "step", "steps")} done, ${part.xp_total} XP</span>
       ${openedFrom(`${branch.repo}/${part.path}`)}
       <ul>${lineList(part)}</ul>
       <p class="hint">${partSteps(part).map(s => esc(s.id.includes(":") ? s.title : s.id)).join(", ")}</p>`;
@@ -1079,7 +1141,7 @@
       const cx = spot.x + cell / 2, cy = spot.y + cell / 2 - 18;
       const angle = Math.atan2(cy, cx);
       const parts = closedParts(branch);
-      const members = parts.length ? parts : [{ path: "", title: branch.title, total: branch.total, lines: branch.lines, parts: [] }];
+      const members = parts.length ? parts : [{ path: "", title: branch.title, total: branch.total, xp_total: branch.xp_total, lines: branch.lines, parts: [] }];
       const rand = seeded(hashText(`sky:${branch.repo}`));
       // A random walk with bounded turns: long enough to read as a figure, never a straight row.
       let heading = rand() * 2 * Math.PI, x = 0, y = 0;
@@ -1106,7 +1168,7 @@
           "aria-label": `${branch.title}, ${part.title}: closed`,
         }, figure);
         g.style.setProperty("--tint", tint);
-        const r = 2 + 0.6 * Math.log2(1 + part.total);
+        const r = 2 + 0.6 * Math.log2(1 + part.xp_total / 10);
         el("circle", { r: (r * 3.2).toFixed(1), class: "sky-glow" }, g);
         el("circle", { r: r.toFixed(1), class: "sky-core" }, g);
         el("circle", { r: 10, class: "sky-hit" }, g);
@@ -1184,11 +1246,25 @@
     skyBranches.forEach((b, i) => {
       el("title", {}, el("circle", { r: R_CORE + 5 + 4 * i, class: "year-ring" }, world)).textContent = `${b.title}, completed`;
     });
-    el("circle", { r: R_CORE, class: "core" }, world);
+    const core = el("circle", { r: R_CORE, class: "core" }, world);
     const done = data.branches.reduce((s, b) => s + b.done, 0);
     const total = data.branches.reduce((s, b) => s + b.total, 0);
-    el("text", { y: -2, "text-anchor": "middle", class: "core-text" }, world).textContent = `${done}`;
-    el("text", { y: 13, "text-anchor": "middle", class: "core-text", "font-size": 10 }, world).textContent = `of ${total}`;
+    const xp = data.branches.reduce((s, b) => s + b.xp_done, 0);
+    const level = levelOf(xp), from = levelXp(level), to = levelXp(level + 1);
+    // A ring inside the rim of the core fills in on the way to the next level.
+    const ring = el("g", { transform: "rotate(-90)" }, world);
+    el("circle", { r: R_CORE - 4, class: "level-track" }, ring);
+    el("circle", { r: R_CORE - 4, class: "level-fill", pathLength: 1, "stroke-dasharray": `${((xp - from) / (to - from)).toFixed(3)} 1` }, ring);
+    el("title", {}, core).textContent = `Level ${level}: ${xp} XP, ${to - xp} to level ${level + 1}`;
+    el("text", { y: -12, "text-anchor": "middle", class: "core-text small" }, world).textContent = "level";
+    el("text", { y: 6, "text-anchor": "middle", class: "core-text big" }, world).textContent = `${level}`;
+    // How much is left to the next level; the ring shows the share already earned.
+    const left = el("text", { y: 18, "text-anchor": "middle", class: "core-text small" }, world);
+    left.textContent = `${to - xp} to ${level + 1}`;
+    // Shrink the line if it is wider than the space inside the ring at its height.
+    const room = 2 * Math.sqrt((R_CORE - 7) ** 2 - 18 ** 2);
+    const width = left.getComputedTextLength();
+    if (width > room) left.style.fontSize = `${(9 * room / width).toFixed(2)}px`;
     drawLocked(roots, mode, animate);
     drawGrown(world, animate);
     // The view fits the tree; the sky is drawn behind it, inside the same box.
@@ -1261,6 +1337,10 @@
     const sleeping = waiting.filter(l => !l.open).length;
     const opened = waiting.length - sleeping;
     let text = `${done} of ${plural(total, "step", "steps")} grown across ${plural(treeBranches.length, "branch", "branches")}.`;
+    // Experience counts every branch, the sky included: it was earned there too.
+    const xp = data.branches.reduce((s, b) => s + b.xp_done, 0);
+    const level = levelOf(xp);
+    text = `Level ${level}, ${xp} XP: ${levelXp(level + 1) - xp} more to level ${level + 1}. ` + text;
     if (skyBranches.length) text += ` ${plural(skyBranches.length, "completed branch is", "completed branches are")} in the sky.`;
     if (opened) text += ` ${plural(opened, "locked branch has", "locked branches have")} opened.`;
     if (mode === "silhouettes" && sleeping) {
@@ -1310,7 +1390,7 @@
     panel.innerHTML = `
       <h2>Where you are</h2>
       <p class="where">Pick any node, branch name or locked seed to read it.</p>
-      <ul>${current.map(({ b, steps }) => `<li>${esc(b.title)}<span class="req-status">${b.done} of ${b.total}</span>${steps.map(s => `<br><span class="hint">${esc(name(s))}</span>`).join("")}</li>`).join("")}</ul>
+      <ul>${current.map(({ b, steps }) => `<li>${esc(b.title)}<span class="req-status">${b.done} of ${b.total} · ${xpText(b)}</span>${steps.map(s => `<br><span class="hint">${esc(name(s))}</span>`).join("")}</li>`).join("")}</ul>
       ${skyBranches.length ? `<p class="hint">In the sky: ${skyBranches.map(b => esc(b.title)).join(", ")}.</p>` : ""}
       <p class="hint">Built ${esc((data.generated_at || "").slice(0, 16).replace("T", " "))} from the progress files.</p>`;
   }

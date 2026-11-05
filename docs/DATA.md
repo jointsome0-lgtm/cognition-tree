@@ -26,6 +26,11 @@ Inside a checklist section:
   - `GROUP · Title` with no ID, for example `B0 · Delivery Framework`. The ID is then `GROUP:n`, n counting such items in that group from 1.
   - Anything else: ID is `line-k:n`, the whole text is the title.
   - The dash may be `—`, `–` or ` - `. Text after the title in parentheses stays part of the title.
+- An item may carry an XP tag anywhere in its text: `{N XP}`, N a whole number, `XP` in any case, spaces allowed inside the braces. For example `K01 — One-block addition {100 XP}`, or `K01 — Overhand {30 XP} (archived 2027-01-02)` in an archive. The tag is removed before the ID and title are read, so it never shows in the title. An item without a tag is worth 10 XP. With several tags the first counts and all are removed. Anything else in braces, such as `{1 point}`, stays text.
+
+### Experience
+
+Each step is worth the XP its tag gives, set when the step is planned; the scale and who sets it are the hub's matter, not this contract's. A done step has earned its XP, an open one has not. XP is never derived from attempts or time.
 
 ## Output: `tree.json`
 
@@ -46,13 +51,15 @@ The build also embeds this object in the page.
         {
           "title": "Knots (B1–B2)",
           "steps": [
-            {"id": "K04", "group": "B1", "title": "Bowline", "done": false, "current": true, "children": []}
+            {"id": "K04", "group": "B1", "title": "Bowline", "done": false, "xp": 30, "current": true, "children": []}
           ]
         }
       ],
       "parts": [],
       "done": 0,
-      "total": 12
+      "total": 12,
+      "xp_done": 0,
+      "xp_total": 180
     }
   ],
   "locked": [
@@ -75,6 +82,7 @@ The build also embeds this object in the page.
 
 - `found` is false when the repository directory or its `PROGRESS.md` is missing; `lines` is then empty.
 - `done` and `total` count all items, children and parts included.
+- `xp` is the step's XP, 10 when it has no tag. `xp_done` and `xp_total` sum the XP of the same items as `done` and `total`: the done ones, and all.
 - `archived` is present and true only on items that come from `ARCHIVE.md`.
 - `current` is true on the first item, in document order, that is not done, once per line. Children are not marked current.
 - Strings are copied from the files without Markdown links: `[text](url)` becomes `text`; backticks and `**` are removed.
@@ -105,7 +113,7 @@ A progress file may be shortened as the learner advances. A done item is then mo
 - [x] K01 — Overhand knot (archived 2026-11-02)
 ```
 
-The build reads the archive like a progress file and keeps only done items whose ID is not in `PROGRESS.md`. Each is marked `archived`, children included, and is never `current`. The archived items of a line go before its live items, in archive order; a line found only in the archive goes before all live lines. An item that is not done in the archive is ignored.
+The build reads the archive like a progress file and keeps only done items that are not in `PROGRESS.md`, children included: an item with its own ID is matched by ID, and one numbered by the build (`GROUP:n`, `line-k:n`) by its group and title, since its number shifts when an earlier item of its group is archived. Each kept item is marked `archived` and is never `current`. The archived items of a line go before its live items, in archive order; a line found only in the archive goes before all live lines. An item that is not done in the archive is ignored, and so is a child that is not done. Numbered IDs are then counted again over the merged lines, so `B0 · Framework` archived before `B0 · Own design` stays `B0:1` and the other `B0:2`.
 
 ## Parts
 
@@ -132,6 +140,8 @@ Each branch has `parts`, empty when there are none, and each part has:
   "parts": [],
   "done": 3,
   "total": 5,
+  "xp_done": 70,
+  "xp_total": 180,
   "closed": false
 }
 ```
@@ -140,6 +150,8 @@ Each branch has `parts`, empty when there are none, and each part has:
 - `title` is the file's `#` heading, unless the heading is missing or contains "progress" or "прогресс"; then it is the directory name.
 - `closed` is true when the part, its own parts included, has at least one item and every item is done.
 - A lock's `step` is looked up in every part as well, so a step moved into a folder still meets its requirement. When two parts use the same ID, the requirement is met if either is done.
+
+The page sizes and fills parts by XP: a closed part's star grows with `xp_total`, and an open part's star fills in by the share of its XP earned, so untagged parts look as they did before tags existed. A step node grows by a quarter for every threefold XP above 10, from three quarters to twice the size, and the steps of a line stand apart in proportion to their sizes, children past their parent the same way, at any depth. The core of the tree shows the learner's level from the XP earned across all branches, the sky included: level L takes 50·L² XP in all, and a ring inside the core fills in on the way to the next level, with how much is left to it, such as `290 to 4`. New steps add XP to earn and take none away, so planning never lowers a level; a done step that is unchecked again, such as after a failed review, takes its XP back until it is done again. Branch labels and panels show XP earned of the XP planned there.
 
 The page draws an open part as a node from which its own lines fan out, and a closed part as one star whose shape and tint come from its path, so it never changes. At the end of a trunk, the only closed part sits on it and several take slots in the fan. Inside a part, closed parts orbit its node in name order, six on the first ring, twelve on the second and so on, and the node becomes a sun: the star the part will be once closed. Closed topics therefore take no room in the fan however many there are.
 

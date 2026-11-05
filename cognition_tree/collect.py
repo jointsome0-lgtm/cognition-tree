@@ -15,6 +15,9 @@ _ITEM = re.compile(r"^( *)- \[([ xX])\]\s*(.*)$")
 _DASH = re.compile(r"\s*[—–]\s*|\s+-\s+")
 _TITLE = re.compile(r"^#\s+(.+)$", re.M)
 _DIGITS = re.compile(r"(\d+)")
+_XP = re.compile(r"\s*\{\s*(\d+)\s*XP\s*\}", re.I)
+# A step without an XP tag is worth the smallest mob.
+DEFAULT_XP = 10
 _PART_DEPTH = 4
 _ICON_TYPES = {".svg": "image/svg+xml", ".png": "image/png", ".webp": "image/webp",
                ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
@@ -118,6 +121,9 @@ def parse_progress(text: str) -> list[dict]:
             fallback_count = 0
 
         text = _plain(item[3])
+        tag = _XP.search(text)
+        xp = int(tag[1]) if tag else DEFAULT_XP
+        text = _XP.sub("", text).strip()
         group = None
         body = text
         if "·" in text:
@@ -138,6 +144,7 @@ def parse_progress(text: str) -> list[dict]:
             "group": group,
             "title": step_title,
             "done": item[2].lower() == "x",
+            "xp": xp,
             "current": False,
             "children": [],
         }
@@ -158,18 +165,40 @@ def parse_progress(text: str) -> list[dict]:
     return lines
 
 
+def _auto(step: dict) -> bool:
+    """Whether the ID was numbered by the build, as `GROUP:n` or `line-k:n`."""
+    group = step["group"]
+    return bool(re.fullmatch(r"line-\d+:\d+", step["id"])
+                or group and re.fullmatch(re.escape(group) + r":\d+", step["id"]))
+
+
+def _key(step: dict) -> tuple:
+    """What makes an archived item the same as a live one.
+
+    A numbered ID shifts when an earlier item of its group leaves the progress
+    file, so such an item is matched by its group and title instead.
+    """
+    return ("title", step["group"], step["title"]) if _auto(step) else ("id", step["id"])
+
+
 def merge_archive(lines: list[dict], archived: list[dict]) -> list[dict]:
     """Put archived done items before the live items of the line with the same title."""
-    live_ids = {step["id"] for line in lines for step in _walk(line["steps"])}
+    live = {_key(step) for line in lines for step in _walk(line["steps"])}
+
+    def keep(steps):
+        kept = []
+        for step in steps:
+            if not step["done"] or _key(step) in live:
+                continue
+            step.update(current=False, archived=True, children=keep(step["children"]))
+            kept.append(step)
+        return kept
+
     merged = [dict(line, steps=list(line["steps"])) for line in lines]
     by_title = {line["title"]: line for line in merged}
     new_lines = []
     for line in archived:
-        steps = [step for step in line["steps"] if step["done"] and step["id"] not in live_ids]
-        for step in steps:
-            step["current"] = False
-            for item in _walk([step]):
-                item["archived"] = True
+        steps = keep(line["steps"])
         if not steps:
             continue
         target = by_title.get(line["title"])
@@ -178,7 +207,25 @@ def merge_archive(lines: list[dict], archived: list[dict]) -> list[dict]:
             by_title[line["title"]] = target
             new_lines.append(target)
         target["steps"][:0] = steps
-    return new_lines + merged
+    result = new_lines + merged
+    _renumber(result)
+    return result
+
+
+def _renumber(lines: list[dict]) -> None:
+    """Number the items without an ID again, in the merged order, as one file would."""
+    groups = {}
+    for k, line in enumerate(lines, 1):
+        count = 0
+        for step in _walk(line["steps"]):
+            if not _auto(step):
+                continue
+            if step["group"]:
+                groups[step["group"]] = groups.get(step["group"], 0) + 1
+                step["id"] = f"{step['group']}:{groups[step['group']]}"
+            else:
+                count += 1
+                step["id"] = f"line-{k}:{count}"
 
 
 def _walk(steps):
@@ -189,6 +236,17 @@ def _walk(steps):
 
 def _has_part(parts: list[dict], path: str) -> bool:
     return any(part["path"] == path or _has_part(part["parts"], path) for part in parts)
+
+
+def _tally(holder: dict) -> dict:
+    """Step counts and XP of a repository or part, its nested parts included."""
+    items = _items(holder)
+    return {
+        "done": sum(item["done"] for item in items),
+        "total": len(items),
+        "xp_done": sum(item["xp"] for item in items if item["done"]),
+        "xp_total": sum(item["xp"] for item in items),
+    }
 
 
 def _items(repository: dict) -> list[dict]:
@@ -244,9 +302,8 @@ def _parts(directory: Path, base: Path, depth: int = 1) -> list[dict]:
             "lines": _read_lines(sub),
             "parts": _parts(sub, base, depth + 1),
         }
-        items = _items(part)
-        done = sum(item["done"] for item in items)
-        part.update(done=done, total=len(items), closed=bool(items) and done == len(items))
+        part.update(_tally(part))
+        part["closed"] = 0 < part["total"] == part["done"]
         parts.append(part)
     return parts
 
@@ -326,8 +383,7 @@ def collect(root: str | Path, hub: str = "learning-hub") -> dict:
                 "lines": _read_lines(directory) if found else [],
                 "parts": _parts(directory, directory) if found else [],
             }
-            items = _items(data)
-            data.update(done=sum(item["done"] for item in items), total=len(items))
+            data.update(_tally(data))
             cache[repo] = data
         return cache[repo]
 

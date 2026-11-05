@@ -37,6 +37,7 @@ class CollectTests(unittest.TestCase):
         for branch in self.tree["branches"]:
             self.assertEqual(set(branch), {
                 "id", "title", "repo", "url", "found", "lines", "parts", "done", "total",
+                "xp_done", "xp_total",
             })
             self.assertEqual(branch["id"], branch["repo"])
             self.assertEqual(branch["url"], f"https://example.invalid/{branch['repo']}")
@@ -63,8 +64,9 @@ class CollectTests(unittest.TestCase):
         self.assertIsNone(by_id["line-1:1"]["group"])
         for item in items:
             self.assertEqual(set(item), {
-                "id", "group", "title", "done", "current", "children",
+                "id", "group", "title", "done", "xp", "current", "children",
             })
+            self.assertEqual(item["xp"], 10)
 
     def test_indentation_current_marking_and_counts(self):
         first = self.paper["lines"][0]["steps"]
@@ -125,6 +127,8 @@ class CollectTests(unittest.TestCase):
             "parts": [],
             "done": 0,
             "total": 0,
+            "xp_done": 0,
+            "xp_total": 0,
         })
 
     def test_requirement_statuses_and_groups(self):
@@ -243,7 +247,8 @@ class PartsTests(unittest.TestCase):
         )
         for part in [intro, deep, *deep["parts"]]:
             self.assertEqual(set(part), {
-                "path", "title", "lines", "parts", "done", "total", "closed",
+                "path", "title", "lines", "parts", "done", "total", "xp_done", "xp_total",
+                "closed",
             })
 
     def test_counts_closed_parts_and_archive(self):
@@ -330,6 +335,70 @@ class ArchiveTests(unittest.TestCase):
             paper = collect(root)["branches"][0]
         self.assertEqual((paper["done"], paper["total"]), (4, 6))
 
+
+class XpTests(unittest.TestCase):
+    def test_tag_sets_xp_and_leaves_the_title(self):
+        lines = parse_progress(
+            "## Checklist\n"
+            "- [x] K01 — One-block addition {100 XP}\n"
+            "- [ ] B1 · K02 — Tail masks {30 xp} (twice)\n"
+            "- [x] K03 — Overhand {300 XP} (archived 2027-01-02)\n"
+            "- [ ] B2 · Loose step {  0 Xp }\n"
+            "- [ ] K04 — Untagged {1 point}\n"
+            "- [ ] K05 — Two tags {30 XP} {100 XP}\n"
+        )
+        got = [(s["id"], s["group"], s["title"], s["xp"]) for s in all_steps(lines)]
+        self.assertEqual(got, [
+            ("K01", None, "One-block addition", 100),
+            ("K02", "B1", "Tail masks (twice)", 30),
+            ("K03", None, "Overhand (archived 2027-01-02)", 300),
+            ("B2:1", "B2", "Loose step", 0),
+            ("K04", None, "Untagged {1 point}", 10),
+            ("K05", None, "Two tags", 30),
+        ])
+
+    def test_xp_sums_count_children_parts_and_archive(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "root"
+            shutil.copytree(ROOT, root)
+            repo = root / "quiet-lab"
+            (repo / "PROGRESS.md").write_text(
+                "## Checklist\n"
+                "- [x] Q01 — Heavy {100 XP}\n"
+                "  - [ ] Q01a — Side note\n"
+                "- [ ] Q02 — Boss {300 XP}\n", encoding="utf-8")
+            (repo / "ARCHIVE.md").write_text(
+                "## Archived checklist\n### Checklist\n- [x] Q00 — Warm-up {30 XP}\n",
+                encoding="utf-8")
+            (repo / "stage").mkdir()
+            (repo / "stage" / "PROGRESS.md").write_text(
+                "## Checklist\n- [x] S01 — Done {30 XP}\n- [x] S02 — Small\n", encoding="utf-8")
+            quiet = collect(root)["branches"][2]
+        stage = quiet["parts"][0]
+        self.assertEqual((stage["xp_done"], stage["xp_total"], stage["closed"]), (40, 40, True))
+        self.assertEqual((quiet["done"], quiet["total"]), (4, 6))
+        self.assertEqual((quiet["xp_done"], quiet["xp_total"]), (170, 480))
+
+
+    def test_archived_group_item_keeps_its_xp_when_numbers_shift(self):
+        live = parse_progress("## Checklist\n- [ ] B0 · Own design {100 XP}\n")
+        archive = parse_progress("## Checklist\n- [x] B0 · Framework {30 XP}\n")
+        steps = list(all_steps(merge_archive(live, archive)))
+        got = [(s["id"], s["title"], s["xp"], s.get("archived", False)) for s in steps]
+        self.assertEqual(got, [("B0:1", "Framework", 30, True), ("B0:2", "Own design", 100, False)])
+        # An item still in the progress file is not counted twice.
+        again = parse_progress("## Checklist\n- [x] B0 · Framework {30 XP}\n- [ ] B0 · Own design\n")
+        self.assertEqual([s["title"] for s in all_steps(merge_archive(again, archive))], ["Framework", "Own design"])
+
+    def test_archived_children_are_filtered_like_items(self):
+        live = parse_progress("## Checklist\n- [ ] P02 — Next\n  - [x] P01b — Kept live {30 XP}\n")
+        archive = parse_progress(
+            "## Checklist\n- [x] P01 — Parent {100 XP}\n"
+            "  - [x] P01b — Kept live {30 XP}\n  - [ ] P01c — Never done {30 XP}\n"
+            "  - [x] P01d — Archived child {10 XP}\n")
+        steps = list(all_steps(merge_archive(live, archive)))
+        self.assertEqual([s["id"] for s in steps], ["P01", "P01d", "P02", "P01b"])
+        self.assertEqual(sum(s["xp"] for s in steps if s["done"]), 140)
 
 class BookTests(unittest.TestCase):
     def test_books_mark_branches_and_add_missing_ones(self):
