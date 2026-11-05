@@ -380,6 +380,7 @@
   const groupLast = new Map();   // "repo|GROUP" -> {x, y}
   const branchTip = new Map();   // repo -> {x, y, angle}
   const labels = [];             // branch label texts, kept clear of locked seeds
+  const labelBlocks = [];        // each branch's name, count and icon, moved together
   const hubAt = new Map();       // "repo" or "repo/path" -> {x, y}, where a branch or part grows
 
   const HOP = 36;  // from a hub to the hub of a part inside it
@@ -529,6 +530,8 @@
     const count = el("text", { x: lx, y: ly + dy + 16, "text-anchor": anchor, class: "branch-count" }, group);
     count.textContent = branch.found ? `${branch.done} of ${branch.total}` : "not found";
     labels.push(label, count);
+    const block = { items: [label, count], angle };
+    labelBlocks.push(block);
     if (branch.icon) {
       // Beside the name; for a name centred above or below the tree, further out.
       const size = ICON_SIZE, gap = 6;
@@ -539,6 +542,7 @@
       if (anchor !== "middle") for (const t of [label, count]) t.setAttribute("x", lx + (anchor === "start" ? 1 : -1) * (size + gap));
       const icon = el("image", { href: branch.icon, x: ix, y: iy, width: size, height: size, class: "branch-icon" }, group);
       labels.push(icon);
+      block.items.push(icon);
       bindSelect(icon, () => showBranch(branch));
     }
     bindSelect(label, () => showBranch(branch));
@@ -1166,7 +1170,7 @@
 
   function render(mode, animate) {
     svg.textContent = "";
-    stepIndex.clear(); groupLast.clear(); branchTip.clear(); labels.length = 0; orbiters.length = 0;
+    stepIndex.clear(); groupLast.clear(); branchTip.clear(); labels.length = 0; labelBlocks.length = 0; orbiters.length = 0;
     drawGradients();
     const world = el("g", { id: "world" }, svg);
     el("circle", { r: R_CORE * 2.6, class: "halo" }, world);
@@ -1176,6 +1180,7 @@
     tagLayer = tags;
     for (const placed of layout()) drawBranch(stems, placed, animate);
     world.appendChild(tags);
+    settleLabels(stems, tags);
     skyBranches.forEach((b, i) => {
       el("title", {}, el("circle", { r: R_CORE + 5 + 4 * i, class: "year-ring" }, world)).textContent = `${b.title}, completed`;
     });
@@ -1194,6 +1199,47 @@
     fit(treeBox);
     applyView();
     summarize(mode, done, total);
+  }
+
+  // Branch names that would cover another name, a node or a part label move outward
+  // along their own branch, a few pixels at a time, until they are clear.
+  function settleLabels(stems, tags) {
+    const PAD = 3, STEP = 6, TRIES = 24;
+    const boxOf = items => items.map(t => t.getBBox()).reduce((u, b) => {
+      const x = Math.min(u.x, b.x), y = Math.min(u.y, b.y);
+      return { x, y, width: Math.max(u.x + u.width, b.x + b.width) - x, height: Math.max(u.y + u.height, b.y + b.height) - y };
+    });
+    const hits = (a, b, dx, dy) => a.x + dx < b.x + b.width + PAD && b.x < a.x + dx + a.width + PAD
+      && a.y + dy < b.y + b.height + PAD && b.y < a.y + dy + a.height + PAD;
+    // Nodes and stars are drawn at the origin of their group and moved there by a transform,
+    // so their boxes are taken through it into the tree's own coordinates.
+    const inverse = stems.getCTM().inverse();
+    const obstacles = [...stems.querySelectorAll(".node, .part-node, .part-star")].map(g => {
+      const m = inverse.multiply(g.getCTM()), b = g.getBBox();
+      const corners = [[b.x, b.y], [b.x + b.width, b.y + b.height]]
+        .map(([x, y]) => new DOMPoint(x, y).matrixTransform(m));
+      const x = Math.min(corners[0].x, corners[1].x), y = Math.min(corners[0].y, corners[1].y);
+      return { x, y, width: Math.abs(corners[1].x - corners[0].x), height: Math.abs(corners[1].y - corners[0].y) };
+    });
+    for (const t of tags.querySelectorAll(".tag, .part-label")) obstacles.push(t.getBBox());
+    const placed = [];
+    for (const block of labelBlocks) {
+      const box = boxOf(block.items);
+      const [ux, uy] = [Math.cos(block.angle), Math.sin(block.angle)];
+      let best = null;
+      for (let k = 0; k <= TRIES; k++) {
+        const dx = ux * STEP * k, dy = uy * STEP * k;
+        // Another name weighs more than a node: a name under a name cannot be read at all.
+        const cost = 4 * placed.filter(b => hits(box, b, dx, dy)).length + obstacles.filter(b => hits(box, b, dx, dy)).length;
+        if (!best || cost < best.cost) best = { cost, dx, dy };
+        if (!cost) break;
+      }
+      if (best.dx || best.dy) for (const t of block.items) {
+        t.setAttribute("x", (+t.getAttribute("x") + best.dx).toFixed(1));
+        t.setAttribute("y", (+t.getAttribute("y") + best.dy).toFixed(1));
+      }
+      placed.push({ ...box, x: box.x + best.dx, y: box.y + best.dy });
+    }
   }
 
   // A seed that grew into a branch or part is gone; a ring bursts where it grew, the first time.
